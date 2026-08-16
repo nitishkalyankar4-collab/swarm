@@ -1,4 +1,4 @@
-# Swarm Omni-Agent Specifications & Consensus Protocol (v12.0.0)
+# Swarm Omni-Agent Specifications & Consensus Protocol (v16.0.0)
 
 This document provides the definitive, production-grade technical specification for the five autonomous agent personas operating within the `/swarm` quantitative multi-agent protocol, incorporating **CCXT**, **VectorBT**, **pandas-datareader**, **OpenBB**, **Agent Reach**, **Firecrawl**, **Crawl4AI**, and **LangGraph**.
 
@@ -112,4 +112,4 @@ class SwarmState(TypedDict):
 ```
 
 Composite Score Formula:
-$$S_{\text{composite}} = 0.25 S_{\text{Alpha(CCXT)}} + 0.25 S_{\text{Trend(pandas-dtr/OpenBB)}} + 0.20 S_{\text{Sentiment(Reach/Firecrawl)}} + 0.20 S_{\text{Prob(VectorBT)}} + 0.10 S_{\text{Exec}}$$
+$$S_{\text{composite}} = 0.25 S_{\text{Alpha(CCXT)}} + 0.25 S_{\text{Trend(pandas-dtr/OpenBB)}} + 0.20 S_{\text{ML(XGBoost/DRL)}} + 0.20 S_{\text{Sentiment(Reach/Firecrawl)}} + 0.10 S_{\text{Exec}}$$

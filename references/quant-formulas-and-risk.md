@@ -1,4 +1,4 @@
-# Quantitative Formulas & Risk Management Reference (v6.0.0)
+# Quantitative Formulas & Risk Management Reference (v16.0.0)
 
 This reference documents all mathematical models, risk formulas, indicator calculations, and portfolio guardrails enforced by the `/swarm` protocol, including **Agent Reach** sentiment models.
 
