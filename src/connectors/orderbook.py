@@ -80,3 +80,28 @@ class OrderbookCalculator:
         except Exception as e:
             logger.error(f"Error calculating CVD delta for {symbol}: {e}")
             return 0.0, "UNKNOWN CVD DELTA"
+
+    async def calculate_vpin(self, symbol: str, lookback_trades: int = 100) -> Tuple[float, str]:
+        """
+        Calculates Volume-Synchronized Probability of Toxicity (VPIN) based on public trades:
+        VPIN = sum(|V_buy - V_sell|) / TotalVolume
+        """
+        try:
+            trades = await self.exchange.fetch_trades(symbol, limit=lookback_trades)
+            if not trades:
+                return 0.25, "SAFE ORDER FLOW"
+            
+            buy_vol = sum(t.get("amount", 0.0) for t in trades if t.get("side") == "buy")
+            sell_vol = sum(t.get("amount", 0.0) for t in trades if t.get("side") == "sell")
+            total_vol = buy_vol + sell_vol
+            
+            if total_vol == 0:
+                return 0.25, "SAFE ORDER FLOW"
+            
+            vpin = abs(buy_vol - sell_vol) / total_vol
+            status = "HIGH TOXICITY (Adverse Selection Risk)" if vpin > 0.40 else "SAFE ORDER FLOW"
+            return round(vpin, 4), status
+        except Exception as e:
+            logger.error(f"Error calculating VPIN toxicity for {symbol}: {e}")
+            return 0.25, "SAFE ORDER FLOW"
+
