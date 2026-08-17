@@ -10,7 +10,7 @@ from src.connectors.sentiment_client import SentimentClient
 from src.analytics.hmm import DiscreteHMMRegimeClassifier
 from src.analytics.options_vol import OptionsVolEngine
 from src.analytics.cointegration import CointegrationStatArbEngine
-from src.ml.engine import PurePythonEnsembleClassifier, DRLPolicyEngine
+from src.ml.engine import PurePythonEnsembleClassifier, DRLPolicyEngine, DeepLearningNeuralNet
 from src.risk.portfolio import VectorizedBacktester, HierarchicalRiskParityOptimizer, PortfolioVaRAuditor
 from src.execution.slicing import AlgorithmicExecutionSlicer
 from src.graph.state import SwarmState
@@ -240,7 +240,14 @@ async def prob_node(state: SwarmState) -> Dict[str, Any]:
 
     features = [imbalance, cvd_ratio, vpin, ema_flag, rsi_diff, atr_ratio]
     ensemble = PurePythonEnsembleClassifier()
-    p_win_ml = ensemble.predict_probability(features)
+    p_win_ensemble = ensemble.predict_probability(features)
+
+    # Deep Learning Neural Network Prediction
+    dl_nn = DeepLearningNeuralNet()
+    p_win_nn = dl_nn.predict_probability(features)
+
+    # Combined Ensemble & Deep Neural Network probability
+    p_win_ml = round(0.5 * p_win_ensemble + 0.5 * p_win_nn, 3)
     s_ml = round(5.0 + (p_win_ml * 5.0), 2)
 
     # 2. Real DRL Policy Engine Execution
