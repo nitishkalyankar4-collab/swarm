@@ -2,6 +2,7 @@ import asyncio
 import sys
 import logging
 import json
+import urllib.request
 from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 
@@ -20,6 +21,7 @@ def get_now_ist_str():
 async def run_single_asset(symbol):
     from src.graph.workflow import run_swarm_workflow
     from src.execution.sizing import PositionSizer
+    from src.execution.journal import SignalJournal
     
     logger.info(f"Starting Swarm Quant Multi-Agent Framework for {symbol}...")
     try:
@@ -28,6 +30,8 @@ async def run_single_asset(symbol):
         
         price = result.get("market_data", {}).get("price", 63500.0)
         composite_score = result.get("composite_score", 0.0)
+        ev = result.get("expected_value", 0.0)
+        veto = result.get("veto_triggered", False)
         
         # 2. Run Risk / Position Sizing calculations
         sizer = PositionSizer(account_balance=10000.0, risk_pct=1.5)
@@ -47,12 +51,32 @@ async def run_single_asset(symbol):
             print(f"• {key:20}: {val}")
         print("="*80 + "\n")
         
+        # Record signal to Journal if approved
+        if not veto and ev >= 0.80 and size_data.get("decision") == "APPROVED":
+            journal = SignalJournal()
+            atr_1h = result.get("market_data", {}).get("atr_1h", price * 0.0025)
+            journal.record_signal(
+                symbol=symbol,
+                direction="LONG",
+                category="INTRADAY",
+                entry_price=entry_price,
+                stop_loss=entry_price - (1.4 * atr_1h),
+                tp1=entry_price + (1.8 * (1.4 * atr_1h)),
+                tp2=entry_price + (3.5 * (1.4 * atr_1h)),
+                tp3=entry_price + (5.5 * (1.4 * atr_1h)),
+                composite_score=composite_score,
+                ev=ev,
+                sizing_data=size_data
+            )
+            print("🟢 Signal recorded in Signal Journal (~/.hermes/skills/trading/swarm/signals_journal.json)\n")
+        
     except Exception as e:
         logger.error(f"Framework execution failed: {e}", exc_info=True)
 
 async def run_all_futures_scan():
-    import urllib.request
     from src.graph.workflow import run_swarm_workflow
+    from src.execution.sizing import PositionSizer
+    from src.execution.journal import SignalJournal
     
     print("\n" + "="*90)
     print(f"⚡ ALL-FUTURES EXCHANGE ENTRY SCANNER (v16.0.0) ⚡")
@@ -60,12 +84,17 @@ async def run_all_futures_scan():
     print(f"Timestamp: {get_now_ist_str()}")
     print("="*90)
     
-    # 1. Fetch Tick list to scan top 12 symbols by volume
     symbols = ["PAXGUSD", "BTCUSD", "ETHUSD", "SOLUSD", "XRPUSD", "DOGEUSD", "AVAXUSD", "LINKUSD", "NEARUSD", "LTCUSD", "CRVUSD", "UNIUSD"]
     print(f"Instantiating LangGraph Workflows for {len(symbols)} perpetual contracts...\n")
     
-    tasks = [run_swarm_workflow(symbol=sym, timeframe="1h") for sym in symbols]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
+    sem = asyncio.Semaphore(2)
+    async def sem_run(sym):
+        async with sem:
+            res = await run_swarm_workflow(symbol=sym, timeframe="1h")
+            await asyncio.sleep(0.2)
+            return res
+            
+    results = await asyncio.gather(*[sem_run(sym) for sym in symbols], return_exceptions=True)
     
     valid_results = []
     for sym, res in zip(symbols, results):
@@ -74,13 +103,15 @@ async def run_all_futures_scan():
             continue
         valid_results.append(res)
         
-    # Sort by Expected Value / Composite Score
     valid_results.sort(key=lambda x: x.get("expected_value", 0.0), reverse=True)
     
     print("-" * 115)
     print(f"| {'Rank':4} | {'Asset':9} | {'Price':10} | {'Score':9} | {'WinProb':7} | {'EV':6} | {'VPIN':6} | {'HMM Regime':24} | {'Verdict':6} |")
     print("-" * 115)
     
+    journal = SignalJournal()
+    sizer = PositionSizer(account_balance=10000.0, risk_pct=1.5)
+
     for idx, r in enumerate(valid_results):
         symbol = r.get("symbol", "")
         price = r.get("market_data", {}).get("price", 0.0)
@@ -89,31 +120,104 @@ async def run_all_futures_scan():
         ev = r.get("expected_value", 0.0)
         vpin = r.get("market_data", {}).get("vpin", 0.0)
         regime = r.get("market_data", {}).get("hmm_regime", "REGIME 3: CHOPPY")
-        # limit length for console display
         if len(regime) > 24:
             regime = regime[:21] + "..."
             
         verdict = "STANDBY"
         if ev >= 0.80 and not r.get("veto_triggered"):
             verdict = "TRADE"
+            # Journal the trade signal
+            atr_1h = r.get("market_data", {}).get("atr_1h", price * 0.0025)
+            stop_loss = price - (1.4 * atr_1h)
+            size_data = sizer.calculate_position_size(price, stop_loss, score)
+            if size_data.get("decision") == "APPROVED":
+                journal.record_signal(
+                    symbol=symbol,
+                    direction="LONG",
+                    category="INTRADAY",
+                    entry_price=price,
+                    stop_loss=stop_loss,
+                    tp1=price + (1.8 * (1.4 * atr_1h)),
+                    tp2=price + (3.5 * (1.4 * atr_1h)),
+                    tp3=price + (5.5 * (1.4 * atr_1h)),
+                    composite_score=score,
+                    ev=ev,
+                    sizing_data=size_data
+                )
             
         print(f"| #{idx+1:<2}   | {symbol:9} | ${price:<8,.2f} | {score:<9.1f} | {win_prob:<5.1f}% | {ev:<4.2f}R | {vpin:<4.2f} | {regime:24} | {verdict:7} |")
         
     print("-" * 115 + "\n")
     
-    # Save results to json file
     with open("swarm_scan_results.json", "w") as f:
         json.dump(valid_results, f, indent=2)
 
-async def run_portfolio_risk_audit():
-    import urllib.request
+async def run_journal_view():
+    from src.execution.journal import SignalJournal
+    journal = SignalJournal()
+    data = journal.load_journal()
     
+    print("\n" + "="*80)
+    print(f"📖 SWARM QUANT SIGNAL JOURNAL & PAPER TRADING PERFORMANCE 📖")
+    print(f"Timestamp: {get_now_ist_str()}")
+    print("="*80)
+    
+    perf = data.get("performance", {})
+    print(f"• Total Closed Trades : {perf.get('total_trades', 0)}")
+    print(f"• Wins / Losses       : {perf.get('wins', 0)} Wins / {perf.get('losses', 0)} Losses")
+    print(f"• Realized Win Rate   : {perf.get('win_rate', 0.0)}%")
+    print(f"• Total Accumulated R : {perf.get('total_r', 0.0)}R")
+    print(f"• Active Open Signals : {perf.get('active_trades', 0)}")
+    print("-" * 80)
+    
+    signals = data.get("signals", [])
+    if not signals:
+        print("No recorded trade signals in journal yet.\n")
+        return
+
+    print("-" * 105)
+    print(f"| {'Timestamp':19} | {'Asset':8} | {'Type':8} | {'Entry':9} | {'Stop':9} | {'TP1':9} | {'Status':8} | {'PnL (R)':7} |")
+    print("-" * 105)
+    for s in reversed(signals[-15:]):
+        ts = s.get("timestamp", "")[:19]
+        sym = s.get("symbol", "")
+        cat = s.get("category", "")
+        entry = s.get("entry_price", 0.0)
+        sl = s.get("stop_loss", 0.0)
+        tp1 = s.get("tp1", 0.0)
+        status = s.get("status", "ACTIVE")
+        pnl = s.get("pnl_r", 0.0)
+        print(f"| {ts:19} | {sym:8} | {cat:8} | ${entry:<8.2f} | ${sl:<8.2f} | ${tp1:<8.2f} | {status:8} | {pnl:<+6.2f}R |")
+    print("-" * 105 + "\n")
+
+async def run_journal_track():
+    from src.execution.journal import SignalJournal
+    from src.connectors.delta_client import DeltaClient
+    
+    print("\n" + "="*80)
+    print(f"🎯 LIVE SIGNAL MONITOR & PRICE TRACKER 🎯")
+    print(f"Timestamp: {get_now_ist_str()}")
+    print("="*80)
+    
+    delta = DeltaClient()
+    tickers_res = await delta.fetch_tickers()
+    tickers = {}
+    if tickers_res and tickers_res.get("success"):
+        for t in tickers_res.get("result", []):
+            tickers[t.get("symbol")] = float(t.get("close") or t.get("mark_price") or 0.0)
+            
+    journal = SignalJournal()
+    updated_journal = journal.update_signals_with_prices(tickers)
+    
+    print(f"Updated active signal states against {len(tickers)} exchange live prices.")
+    await run_journal_view()
+
+async def run_portfolio_risk_audit():
     print("\n" + "="*80)
     print(f"🛡️ AUTOHEDGE PORTFOLIO RISK & VAL-AT-RISK AUDITOR (v16.0.0) 🛡️")
     print(f"Timestamp: {get_now_ist_str()}")
     print("="*80)
     
-    # Simulated active positions
     positions = [
         {"symbol": "SOLUSD", "side": "SHORT", "entry": 75.68, "notional": -6397.10, "margin": 254.75, "leverage": 25.1},
         {"symbol": "DOGEUSD", "side": "LONG", "entry": 0.0698, "notional": 595.00, "margin": 117.74, "leverage": 5.0},
@@ -121,7 +225,6 @@ async def run_portfolio_risk_audit():
         {"symbol": "ETHUSD", "side": "SHORT", "entry": 1890.0, "notional": -100000.00, "margin": 500.00, "leverage": 200.0}
     ]
     
-    # Fetch live ticker price
     tickers = {}
     try:
         req = urllib.request.Request("https://api.india.delta.exchange/v2/tickers", headers={'User-Agent': 'Mozilla/5.0'})
@@ -145,7 +248,6 @@ async def run_portfolio_risk_audit():
         tick = tickers.get(sym, {})
         mark_price = float(tick.get("close") or tick.get("mark_price") or pos["entry"])
         
-        # update notional based on mark price ratio
         ratio = mark_price / pos["entry"]
         current_notional = pos["notional"] * ratio
         
@@ -157,11 +259,9 @@ async def run_portfolio_risk_audit():
         
     print("-" * 88)
     
-    # Portfolio statistics
-    portfolio_heat = (total_margin / 10000.0) * 100 # ₹10k benchmark capitalization
+    portfolio_heat = (total_margin / 10000.0) * 100
     net_exposure_ratio = (net_exposure / total_notional) * 100 if total_notional > 0 else 0.0
     
-    # Compute 95% Parametric VaR & 99% CVaR
     var_95 = total_notional * 0.0031
     cvar_99 = total_notional * 0.0051
     
@@ -172,10 +272,9 @@ async def run_portfolio_risk_audit():
     print(f"• Expected Shortfall (CVaR)    : ${cvar_99:,.2f} USD (99% 1-Day Horizon)")
     print("-" * 80)
     
-    # AutoHedge Recommendation Sizing Action
     if abs(net_exposure_ratio) > 30.0:
         verdict = "⚠️ RISK EXPOSURE UNBALANCED"
-        hedge_size = abs(net_exposure) * 0.40 # target neutral hedge ratio
+        hedge_size = abs(net_exposure) * 0.40
         hedge_side = "LONG" if net_exposure < 0 else "SHORT"
         recommendation = f"Open a ${hedge_size:,.2f} USD {hedge_side} HEDGE to balance portfolio delta."
     else:
@@ -191,11 +290,14 @@ async def main():
     if len(sys.argv) > 1:
         target = sys.argv[1]
         
-    # Router mapping matching matrix intents
     if target.lower() in ["scan", "all", "scan all", "scan_all"]:
         await run_all_futures_scan()
     elif target.lower() in ["risk", "portfolio"]:
         await run_portfolio_risk_audit()
+    elif target.lower() in ["journal", "signals"]:
+        await run_journal_view()
+    elif target.lower() in ["track", "monitor"]:
+        await run_journal_track()
     elif target.lower() in ["upgrade"]:
         print(f"\n⚡ Upgrading master quant system engine to v16.0.0...")
         await asyncio.sleep(0.5)
