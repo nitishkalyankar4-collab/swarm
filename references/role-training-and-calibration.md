@@ -1,4 +1,4 @@
-# Agent Role Calibration & Mastery Protocol (v16.0.0)
+# Agent Role Calibration & Mastery Protocol (v17.0.0)
 
 This document serves as the master training manual for perfecting each of the five autonomous agent personas operating under the `/swarm` protocol, including **Agent Sentiment** via **Agent Reach**.
 

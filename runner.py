@@ -41,7 +41,7 @@ async def run_single_asset(symbol):
         
         # Display Execution Memo and Risk Sizing Outputs
         print("\n" + "="*80)
-        print("                 ⚡ SWARM INTERACTIVE PRE-TRADE MEMO (v16.0.0) ⚡")
+        print("                 ⚡ SWARM INTERACTIVE PRE-TRADE MEMO (v17.0.0) ⚡")
         print("="*80)
         print(result.get("trade_memo_html"))
         print("="*80)
@@ -79,7 +79,7 @@ async def run_all_futures_scan():
     from src.execution.journal import SignalJournal
     
     print("\n" + "="*90)
-    print(f"⚡ ALL-FUTURES EXCHANGE ENTRY SCANNER (v16.0.0) ⚡")
+    print(f"⚡ ALL-FUTURES EXCHANGE ENTRY SCANNER (v17.0.0) ⚡")
     print(f"Execution Mode: Full CEX Futures Scan & StateGraph Consensus Ranking")
     print(f"Timestamp: {get_now_ist_str()}")
     print("="*90)
@@ -214,7 +214,7 @@ async def run_journal_track():
 
 async def run_portfolio_risk_audit():
     print("\n" + "="*80)
-    print(f"🛡️ AUTOHEDGE PORTFOLIO RISK & VAL-AT-RISK AUDITOR (v16.0.0) 🛡️")
+    print(f"🛡️ AUTOHEDGE PORTFOLIO RISK & VAL-AT-RISK AUDITOR (v17.0.0) 🛡️")
     print(f"Timestamp: {get_now_ist_str()}")
     print("="*80)
     
@@ -299,9 +299,9 @@ async def main():
     elif target.lower() in ["track", "monitor"]:
         await run_journal_track()
     elif target.lower() in ["upgrade"]:
-        print(f"\n⚡ Upgrading master quant system engine to v16.0.0...")
+        print(f"\n⚡ Upgrading master quant system engine to v17.0.0...")
         await asyncio.sleep(0.5)
-        print(f"🚀 Upgrade hooks recalibrated. Version synchronized to v16.0.0.")
+        print(f"🚀 Upgrade hooks recalibrated. Version synchronized to v17.0.0.")
         print(f"All 25 institutional core modules verified: complete.\n")
     else:
         await run_single_asset(target)

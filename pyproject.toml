@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "swarm-quant-agent"
-version = "16.0.0"
+version = "17.0.0"
 description = "Institutional-Grade Multi-Agent Quant Hedge Fund Swarm Engine using LangGraph and CCXT"
 readme = "README.md"
 requires-python = ">=3.10"

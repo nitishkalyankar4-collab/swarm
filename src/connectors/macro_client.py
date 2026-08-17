@@ -18,7 +18,7 @@ class MacroClient:
         """
         url = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=T10Y2Y"
         try:
-            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (Swarm-Quant/16.0.0)'})
+            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (Swarm-Quant/17.0.0)'})
             with urllib.request.urlopen(req, timeout=10.0) as resp:
                 data = resp.read().decode('utf-8')
                 reader = csv.reader(io.StringIO(data))

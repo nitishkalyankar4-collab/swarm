@@ -13,7 +13,7 @@ class DeltaClient:
         self.base_url = base_url
         self.api_key = api_key
         self.api_secret = api_secret
-        self.headers = {"User-Agent": "Swarm-Agent-Client/16.0.0"}
+        self.headers = {"User-Agent": "Swarm-Agent-Client/17.0.0"}
         if api_key:
             self.headers["Api-Key"] = api_key
             # In production, signature generation would be added here

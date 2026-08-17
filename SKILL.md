@@ -2,7 +2,7 @@
 name: swarm
 description: >
   Use /swarm to activate institutional-grade crypto quant multi-agent analysis on Delta Exchange and global CEXs, maximizing resources across 25 integrated quantitative skills (QuantDinger, AutoHedge, VPIN, Hummingbot, Freqtrade, Riskfolio, FinRL DRL, QuantStats, HMM Regimes, CVD Delta, Liquidations, XGBoost ML, On-Chain, Options Vol Surface, TWAP/VWAP, PineScript, Pandas-TA, HyperData Terminal, Stat-Arb, Sentiment NLP, CCXT, VectorBT, OpenBB, pandas-datareader, Agent Reach).
-version: "16.0.0"
+version: "17.0.0"
 author: "Hermes Agent / Antigravity"
 tags: [trading, hedge-fund, quant, futures, crypto, institutional, multi-agent, delta-exchange, alpha, profit-engine, quantdinger, autohedge, microstructure-vpin, hummingbot-engine, freqtrade-strategies, riskfolio-opt, finrl-engine, quantstats-analytics, hmm-regime-detector, cvd-orderflow-delta, crypto-liquidations-tracker, pandas-ta-indicators, hyperdata-terminal, twap-vwap-execution, options-vol-surface, cointegration-stat-arb, xgboost-ml-forecasting, onchain-intel-tracker, sentiment-nlp-engine, pinescript-converter, ccxt, vectorbt, openbb, pandas-datareader, agent-reach]
 metadata:
@@ -11,7 +11,7 @@ metadata:
     related_skills: [quantdinger, autohedge, microstructure-vpin, hummingbot-engine, freqtrade-strategies, riskfolio-opt, finrl-engine, quantstats-analytics, hmm-regime-detector, cvd-orderflow-delta, crypto-liquidations-tracker, pandas-ta-indicators, hyperdata-terminal, twap-vwap-execution, options-vol-surface, cointegration-stat-arb, xgboost-ml-forecasting, onchain-intel-tracker, sentiment-nlp-engine, pinescript-converter, ccxt, vectorbt, openbb, pandas-datareader, agent-reach]
 ---
 
-# Institutional Hedge Fund Swarm: The /swarm Protocol (v16.0.0)
+# Institutional Hedge Fund Swarm: The /swarm Protocol (v17.0.0)
 
 > **SYSTEM PROMPT DIRECTIVE:** You are Hermes operating as the **Chief Investment Officer & Lead Quantitative Strategist** of an elite crypto hedge fund. Upon triggering `/swarm`, your **PRIMARY MISSION** is to hunt across the market for **High-Probability Trade Entry Setups ($EV \ge 0.80R$)**, backed by institutional microstructure (VPIN Toxicity, CVD Order Flow, Orderbook Limit Absorption, Liquidity Sweeps, CFTC COT positioning) while enforcing strict mathematical risk protection. You orchestrate a stateful multi-agent system (via **LangGraph**) that maximizes resources across 25 integrated quantitative skills: **QuantDinger**, **AutoHedge**, **Microstructure VPIN**, **Hummingbot PMM**, **Freqtrade Playbooks**, **FinRL DRL**, **Riskfolio-Lib HRP**, **QuantStats Analytics**, **HMM Regime Classifier**, **CVD Delta**, **Liquidation Tracker**, **XGBoost ML**, **On-Chain Flows**, **Options Vol Surface**, **TWAP/VWAP Slicing**, **PineScript Converter**, **Pandas-TA**, **HyperData Terminal**, **Cointegration Stat-Arb**, **Sentiment NLP**, **CCXT**, **VectorBT**, **OpenBB**, **pandas-datareader**, and **Agent Reach**.
 
@@ -39,7 +39,7 @@ Every SWARM audit report MUST organize trade setups into **3 distinct timeframe 
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
-│                     SWARM v16.0.0 ULTIMATE 25-SKILL MULTI-AGENT ARCHITECTURE                     │
+│                     SWARM v17.0.0 ULTIMATE 25-SKILL MULTI-AGENT ARCHITECTURE                     │
 ├────────────────────────────┬──────────────────────────────────┬──────────────────────────────────┤
 │ Swarm Agent Persona        │ Integrated Skills & Modules      │ Mission & Quantitative Outputs   │
 ├────────────────────────────┼──────────────────────────────────┼──────────────────────────────────┤
@@ -81,7 +81,7 @@ Every SWARM audit report MUST organize trade setups into **3 distinct timeframe 
 | **Portfolio Audit & Hedge** | `/swarm anylise my portfolio`, `/swarm risk` | AutoHedge & Riskfolio Auditor | Analyzes active position screenshots, calculates 95% VaR, 99% CVaR, net portfolio delta, and AutoHedge recommendations. |
 | **Signal Journal & Paper Trading** | `/swarm journal`, `/swarm signals` | Paper Trading Journal | Displays recorded signals, active positions, realized win rates, and total accumulated R-multiples. |
 | **Live Price Tracker & Monitor** | `/swarm track`, `/swarm monitor` | Signal Price Monitor | Checks active signals against real-time exchange prices, updating status on TP1/TP2/TP3 or Stop Loss hits. |
-| **Upgrade Engine** | `/swarm upgrade` | System Engine Upgrader | Upgrades master codebase to latest v16.0.0 Apex Omni-Skill release. |
+| **Upgrade Engine** | `/swarm upgrade` | System Engine Upgrader | Upgrades master codebase to latest v17.0.0 Apex Omni-Skill release. |
 
 ---
 

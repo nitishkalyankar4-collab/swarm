@@ -1,4 +1,4 @@
-# Quantitative Strategy Playbooks Reference (v16.0.0)
+# Quantitative Strategy Playbooks Reference (v17.0.0)
 
 This reference documents the core execution playbooks used by the `/swarm` protocol, combining **CCXT**, **VectorBT**, **pandas-datareader**, **OpenBB**, **Agent Reach**, **Firecrawl**, **Crawl4AI**, and **LangGraph**.
 
@@ -39,7 +39,7 @@ Captures macro directional tailwinds by cross-referencing CME Bitcoin & Ether CF
 
 ---
 
-## Playbook 9: Omni-Resource Multi-Exchange VectorBT Backtested Arbitrage (v16.0.0)
+## Playbook 9: Omni-Resource Multi-Exchange VectorBT Backtested Arbitrage (v17.0.0)
 
 ### Strategy Concept
 The ultimate multi-source quant setup combining CCXT multi-CEX orderbook imbalance, pandas-datareader FRED yield curve metrics, Agent Reach social sentiment, and VectorBT strategy backtest validation.

@@ -1,4 +1,4 @@
-# Swarm Omni-Agent Specifications & Consensus Protocol (v16.0.0)
+# Swarm Omni-Agent Specifications & Consensus Protocol (v17.0.0)
 
 This document provides the definitive, production-grade technical specification for the five autonomous agent personas operating within the `/swarm` quantitative multi-agent protocol, incorporating **CCXT**, **VectorBT**, **pandas-datareader**, **OpenBB**, **Agent Reach**, **Firecrawl**, **Crawl4AI**, and **LangGraph**.
 

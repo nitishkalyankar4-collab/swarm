@@ -391,7 +391,7 @@ async def exec_node(state: SwarmState) -> Dict[str, Any]:
     var_m = state.get("market_data", {}).get("var_metrics", {})
     drl_act = state.get("market_data", {}).get("drl_policy", {}).get("recommended_action", "LONG")
 
-    html_memo = f"""⚡ <b>INSTITUTIONAL QUANT SWARM SIGNAL (v16.0.0 REAL)</b> ⚡
+    html_memo = f"""⚡ <b>INSTITUTIONAL QUANT SWARM SIGNAL (v17.0.0 REAL)</b> ⚡
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
 <b>Asset:</b> <code>#{symbol}</code> (Delta Exchange Futures & Global CEXs)
 <b>Regime:</b> 📈 {state.get("market_data", {}).get("hmm_regime", "REGIME 1")}
