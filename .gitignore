@@ -45,8 +45,11 @@ htmlcov/
 venv/
 .venv/
 env/
+# Environment & Runtime data
 .env
-.envs
+*.json
+signals_journal.json
+swarm_scan_results.json
 
 # IDEs and editors
 .idea/

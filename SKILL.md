@@ -79,6 +79,8 @@ Every SWARM audit report MUST organize trade setups into **3 distinct timeframe 
 | **Omni-Swarm Scan** | `/swarm`, `/swarm scan`, "find profitable setups" | Multi-Symbol Omni Scanner | Runs 5-agent LangGraph workflow across all 25 integrated quantitative skills. |
 | **Asset Deep Dive** | `/swarm BTCUSD`, `/swarm ETH`, "run swarm analysis on SOL" | Single-Asset Omni Audit | Executes complete 25-skill multi-resource single-asset audit. |
 | **Portfolio Audit & Hedge** | `/swarm anylise my portfolio`, `/swarm risk` | AutoHedge & Riskfolio Auditor | Analyzes active position screenshots, calculates 95% VaR, 99% CVaR, net portfolio delta, and AutoHedge recommendations. |
+| **Signal Journal & Paper Trading** | `/swarm journal`, `/swarm signals` | Paper Trading Journal | Displays recorded signals, active positions, realized win rates, and total accumulated R-multiples. |
+| **Live Price Tracker & Monitor** | `/swarm track`, `/swarm monitor` | Signal Price Monitor | Checks active signals against real-time exchange prices, updating status on TP1/TP2/TP3 or Stop Loss hits. |
 | **Upgrade Engine** | `/swarm upgrade` | System Engine Upgrader | Upgrades master codebase to latest v16.0.0 Apex Omni-Skill release. |
 
 ---
