@@ -1,6 +1,6 @@
 """
-Delta Exchange India Production Execution Module
-Integrated with Authenticated HTTP/HTTPS Proxy, HMAC-SHA256 Signing & Synchronous SL/TP Orders
+Delta Exchange India Production Execution Module (v19.0.0 Refactored)
+Integrated with Authenticated HTTP/HTTPS Proxy, HMAC-SHA256 Signing & Method A Atomic Bracket Orders
 """
 
 import hmac
@@ -16,11 +16,31 @@ from requests.exceptions import RequestException, Timeout, HTTPError
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s - %(message)s")
 logger = logging.getLogger("DeltaExecutionClient")
 
+def format_price_by_tick_size(price: float, tick_size_str: str = "0.01") -> str:
+    """
+    Formats price string according to product tick size to prevent silent payload rejections.
+    """
+    try:
+        tick_float = float(tick_size_str)
+        if "." in str(tick_size_str):
+            decimals = len(str(tick_size_str).split(".")[1])
+            steps = round(price / tick_float)
+            rounded_price = steps * tick_float
+            return f"{rounded_price:.{decimals}f}"
+        else:
+            steps = round(price / tick_float)
+            rounded_price = steps * tick_float
+            return f"{int(rounded_price)}"
+    except Exception:
+        if price < 1.0:
+            return f"{price:.4f}"
+        return f"{price:.2f}"
+
 class DeltaExecutionClient:
     """
     Production-ready execution client for Delta Exchange India (api.india.delta.exchange)
     integrated with authenticated proxy routing, HMAC-SHA256 request signing,
-    and synchronous hard Stop Loss & Take Profit order placement.
+    and atomic bracket SL/TP order placement schema.
     """
 
     def __init__(
@@ -188,12 +208,31 @@ class DeltaExecutionClient:
         side: str,
         order_type: str = "limit_order",
         limit_price: Optional[Union[int, float, str]] = None,
-        stop_price: Optional[Union[int, float, str]] = None,
+        stop_loss_price: Optional[Union[int, float, str]] = None,
+        take_profit_price: Optional[Union[int, float, str]] = None,
         post_only: bool = False
     ) -> Dict[str, Any]:
         """
-        Executes limit and market perpetual orders.
-        Endpoint: POST /v2/orders
+        Executes limit and market perpetual orders using Method A Atomic Bracket Payload Schema:
+        ```json
+        {
+          "product_id": <PRODUCT_ID>,
+          "size": <SIZE>,
+          "side": "buy",
+          "order_type": "limit_order",
+          "limit_price": "<LIMIT_PRICE_STRING>",
+          "bracket_order": {
+            "stop_loss_order": {
+              "order_type": "stop_market_order",
+              "stop_price": "<SL_PRICE_STRING>"
+            },
+            "take_profit_order": {
+              "order_type": "take_profit_market_order",
+              "stop_price": "<TP_PRICE_STRING>"
+            }
+          }
+        }
+        ```
         """
         side_fmt = side.lower()
         if side_fmt not in ("buy", "sell"):
@@ -214,16 +253,28 @@ class DeltaExecutionClient:
             "order_type": order_type_fmt
         }
 
-        if limit_price is not None:
+        if order_type_fmt == "limit_order" and limit_price is not None:
             payload["limit_price"] = str(limit_price)
-
-        if stop_price is not None:
-            payload["stop_price"] = str(stop_price)
 
         if post_only:
             payload["post_only"] = True
 
-        logger.info(f"Placing {order_type_fmt} order: {side_fmt.upper()} {size} contracts on Product ID {product_id} @ Price: {limit_price or 'MARKET'}")
+        # Method A: Atomic Bracket Payload Schema
+        if stop_loss_price is not None or take_profit_price is not None:
+            bracket_order = {}
+            if stop_loss_price is not None:
+                bracket_order["stop_loss_order"] = {
+                    "order_type": "stop_market_order",
+                    "stop_price": str(stop_loss_price)
+                }
+            if take_profit_price is not None:
+                bracket_order["take_profit_order"] = {
+                    "order_type": "take_profit_market_order",
+                    "stop_price": str(take_profit_price)
+                }
+            payload["bracket_order"] = bracket_order
+
+        logger.info(f"Placing {order_type_fmt}: {side_fmt.upper()} {size} contracts on Product ID {product_id} @ Price: {limit_price or 'MARKET'} (SL: {stop_loss_price}, TP: {take_profit_price})")
         return self.request("POST", "/v2/orders", data=payload, authenticated=True)
 
     def place_stop_loss_order(
@@ -234,7 +285,7 @@ class DeltaExecutionClient:
         stop_price: Union[int, float, str]
     ) -> Dict[str, Any]:
         """
-        Submits synchronous reduce-only Stop Loss order to Delta Exchange India.
+        Submits reduce-only Stop Loss order to Delta Exchange India.
         """
         opp_side = "sell" if side.lower() == "buy" else "buy"
         payload = {
@@ -257,7 +308,7 @@ class DeltaExecutionClient:
         take_profit_price: Union[int, float, str]
     ) -> Dict[str, Any]:
         """
-        Submits synchronous reduce-only Take Profit order to Delta Exchange India.
+        Submits reduce-only Take Profit order to Delta Exchange India.
         """
         opp_side = "sell" if side.lower() == "buy" else "buy"
         payload = {
@@ -284,10 +335,35 @@ class DeltaExecutionClient:
         take_profit_price: Optional[Union[int, float, str]] = None
     ) -> Dict[str, Any]:
         """
-        Places entry order and synchronously attaches hard Stop Loss & Take Profit orders upon entry fill.
+        Places entry order using Method A Atomic Bracket payload and falls back to
+        synchronous reduce-only SL/TP placement if needed.
         """
+        try:
+            # Try Method A: Atomic Bracket Payload in /v2/orders
+            entry_res = self.place_order(
+                product_id=product_id,
+                size=size,
+                side=side,
+                order_type=order_type,
+                limit_price=limit_price,
+                stop_loss_price=stop_loss_price,
+                take_profit_price=take_profit_price
+            )
+            sl_res = entry_res
+            tp_res = entry_res
+
+            if entry_res and entry_res.get("success"):
+                return {
+                    "entry_order": entry_res,
+                    "stop_loss_order": sl_res,
+                    "take_profit_order": tp_res,
+                    "bracket_type": "ATOMIC_BRACKET"
+                }
+        except Exception as e:
+            logger.warning(f"Method A Atomic Bracket order placement warning: {e}. Falling back to synchronous reduce-only order placement...")
+
+        # Fallback Method B: Entry Order + Synchronous SL/TP Orders
         entry_res = self.place_order(product_id, size, side, order_type, limit_price)
-        
         sl_res = None
         tp_res = None
 
@@ -296,18 +372,19 @@ class DeltaExecutionClient:
                 try:
                     sl_res = self.place_stop_loss_order(product_id, size, side, stop_loss_price)
                 except Exception as e:
-                    logger.error(f"Failed to submit synchronous Stop Loss order: {e}")
+                    logger.error(f"Failed to submit reduce-only Stop Loss order: {e}")
 
             if take_profit_price:
                 try:
                     tp_res = self.place_take_profit_order(product_id, size, side, take_profit_price)
                 except Exception as e:
-                    logger.error(f"Failed to submit synchronous Take Profit order: {e}")
+                    logger.error(f"Failed to submit reduce-only Take Profit order: {e}")
 
         return {
             "entry_order": entry_res,
             "stop_loss_order": sl_res,
-            "take_profit_order": tp_res
+            "take_profit_order": tp_res,
+            "bracket_type": "SYNCHRONOUS_REDUCE_ONLY"
         }
 
     def cancel_order(self, product_id: int, order_id: int) -> Dict[str, Any]:

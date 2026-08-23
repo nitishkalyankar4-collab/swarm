@@ -38,7 +38,7 @@ async def attach_sl_tp_to_all_positions():
     Scans all active open positions on Delta Exchange India and synchronously
     attaches hard reduce-only Stop Loss & Take Profit orders to any un-protected position.
     """
-    from delta_execution_module import DeltaExecutionClient
+    from delta_execution_module import DeltaExecutionClient, format_price_by_tick_size
     from src.connectors.delta_client import DeltaClient
     
     print("\n" + "="*95)
@@ -51,6 +51,8 @@ async def attach_sl_tp_to_all_positions():
     try:
         pos_res = client.get_positions()
         pos_list = pos_res.get("result", []) if pos_res and pos_res.get("success") else []
+        products_res = client.get_products()
+        prod_map = {p.get("symbol"): p for p in products_res.get("result", [])} if products_res and products_res.get("success") else {}
     except Exception as e:
         print(f"❌ Failed to fetch active positions: {e}")
         return
@@ -74,6 +76,9 @@ async def attach_sl_tp_to_all_positions():
         side = "buy" if raw_size > 0 else "sell"
         is_long = side == "buy"
 
+        prod_spec = prod_map.get(sym, {})
+        tick_size_str = str(prod_spec.get("tick_size") or "0.01")
+
         # Fetch candles for ATR
         end_t = int(time.time())
         start_t = end_t - 30 * 24 * 3600
@@ -90,13 +95,16 @@ async def attach_sl_tp_to_all_positions():
                     trs = [max(highs[i] - lows[i], abs(highs[i] - closes[i-1]), abs(lows[i] - closes[i-1])) for i in range(1, len(closes))]
                     atr = sum(trs[-14:]) / 14.0
 
+        # Inverted trigger price protection logic:
+        # LONG: SL < entry, TP > entry
+        # SHORT: SL > entry, TP < entry
         stop_loss = entry_price - (1.4 * atr) if is_long else entry_price + (1.4 * atr)
         risk_dist = abs(entry_price - stop_loss)
         take_profit = entry_price + (3.0 * risk_dist) if is_long else entry_price - (3.0 * risk_dist)
 
-        sl_str = f"{stop_loss:.4f}" if entry_price < 1.0 else f"{stop_loss:.2f}"
-        tp_str = f"{take_profit:.4f}" if entry_price < 1.0 else f"{take_profit:.2f}"
-        entry_str = f"${entry_price:,.4f}" if entry_price < 1.0 else f"${entry_price:,.2f}"
+        sl_str = format_price_by_tick_size(stop_loss, tick_size_str)
+        tp_str = format_price_by_tick_size(take_profit, tick_size_str)
+        entry_str = format_price_by_tick_size(entry_price, tick_size_str)
 
         print(f"\n--- [Synchronous Protection: #{sym}] ---")
         print(f"• Position       : {side.upper()} {size} contracts @ {entry_str}")
@@ -128,7 +136,7 @@ async def run_single_asset(symbol, auto_execute: bool = False):
     from src.graph.workflow import run_swarm_workflow
     from src.execution.sizing import PositionSizer
     from src.connectors.delta_client import DeltaClient
-    from delta_execution_module import DeltaExecutionClient
+    from delta_execution_module import DeltaExecutionClient, format_price_by_tick_size
     
     logger.info(f"Starting Swarm Quant Multi-Agent Framework v18.0.0 for {symbol}...")
     try:
@@ -144,11 +152,13 @@ async def run_single_asset(symbol, auto_execute: bool = False):
         product_id = exec_client.get_product_id_by_symbol(symbol) or 27
         
         contract_value = 1.0
+        tick_size_str = "0.01"
         try:
             products = exec_client.get_products().get("result", [])
             for p in products:
                 if p.get("id") == product_id:
                     contract_value = float(p.get("contract_value") or 1.0)
+                    tick_size_str = str(p.get("tick_size") or "0.01")
                     break
         except Exception:
             pass
@@ -195,9 +205,9 @@ async def run_single_asset(symbol, auto_execute: bool = False):
             if size_data.get("decision") == "APPROVED":
                 side = "buy" if is_long else "sell"
                 contracts = size_data.get("contracts", 1)
-                limit_price_str = f"{entry_price:.4f}" if entry_price < 1.0 else f"{entry_price:.2f}"
-                sl_price_str = f"{stop_loss:.4f}" if stop_loss < 1.0 else f"{stop_loss:.2f}"
-                tp_price_str = f"{take_profit:.4f}" if take_profit < 1.0 else f"{take_profit:.2f}"
+                limit_price_str = format_price_by_tick_size(entry_price, tick_size_str)
+                sl_price_str = format_price_by_tick_size(stop_loss, tick_size_str)
+                tp_price_str = format_price_by_tick_size(take_profit, tick_size_str)
                 
                 print(f"[*] Submitting Live Entry Order: {side.upper()} {contracts} contracts of #{symbol} @ ${limit_price_str}...")
                 print(f"[*] Synchronous Hard Stop Loss Target   : ${sl_price_str}")
@@ -256,7 +266,7 @@ async def run_single_asset(symbol, auto_execute: bool = False):
 async def run_all_futures_scan(auto_execute: bool = False):
     from src.graph.workflow import run_swarm_workflow
     from src.connectors.delta_client import DeltaClient
-    from delta_execution_module import DeltaExecutionClient
+    from delta_execution_module import DeltaExecutionClient, format_price_by_tick_size
     from src.execution.sizing import PositionSizer
     
     now_ist = get_now_ist_str()
@@ -435,6 +445,7 @@ async def run_all_futures_scan(auto_execute: bool = False):
                 prod_info = prod_map.get(sym, {})
                 product_id = prod_info.get("id") or exec_client.get_product_id_by_symbol(sym) or 27
                 contract_val = float(prod_info.get("contract_value") or 1.0)
+                tick_size_str = str(prod_info.get("tick_size") or "0.01")
 
                 is_long = "LONG" in direction
                 stop_loss = price - (1.4 * atr_1h) if is_long else price + (1.4 * atr_1h)
@@ -447,9 +458,9 @@ async def run_all_futures_scan(auto_execute: bool = False):
                 if size_data.get("decision") == "APPROVED":
                     side = "buy" if is_long else "sell"
                     contracts = size_data.get("contracts", 1)
-                    limit_price_str = f"{price:.4f}" if price < 1.0 else f"{price:.2f}"
-                    sl_price_str = f"{stop_loss:.4f}" if stop_loss < 1.0 else f"{stop_loss:.2f}"
-                    tp_price_str = f"{take_profit:.4f}" if take_profit < 1.0 else f"{take_profit:.2f}"
+                    limit_price_str = format_price_by_tick_size(price, tick_size_str)
+                    sl_price_str = format_price_by_tick_size(stop_loss, tick_size_str)
+                    tp_price_str = format_price_by_tick_size(take_profit, tick_size_str)
 
                     print(f"--- [Trade #{rank_idx+1}/3: #{sym}] ---")
                     print(f"[*] Submitting Entry Order: {side.upper()} {contracts} contracts of #{sym} @ ${limit_price_str}...")
@@ -491,7 +502,7 @@ async def run_all_futures_scan(auto_execute: bool = False):
 
 async def run_portfolio_risk_audit():
     from src.connectors.delta_client import DeltaClient
-    from delta_execution_module import DeltaExecutionClient
+    from delta_execution_module import DeltaExecutionClient, format_price_by_tick_size
     
     delta = DeltaClient()
     client = DeltaExecutionClient(verify_proxy_on_init=False)
@@ -502,7 +513,6 @@ async def run_portfolio_risk_audit():
     print(f"Timestamp: {now_ist}")
     print("="*115 + "\n")
 
-    # Fetch live active positions and live open trigger orders
     pos_res = client.get_positions()
     pos_list = pos_res.get("result", []) if pos_res and pos_res.get("success") else []
     active_positions = [p for p in pos_list if abs(float(p.get("size", 0))) > 0]
@@ -510,7 +520,6 @@ async def run_portfolio_risk_audit():
     open_orders_res = client.request("GET", "/v2/orders", params={"state": "open"})
     open_orders = open_orders_res.get("result", []) if open_orders_res and open_orders_res.get("success") else []
 
-    # Map open trigger SL and TP orders by product symbol
     sl_map = {}
     tp_map = {}
     for o in open_orders:
