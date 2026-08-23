@@ -40,17 +40,13 @@ async def run_single_asset(symbol, auto_execute: bool = False):
     
     logger.info(f"Starting Swarm Quant Multi-Agent Framework v18.0.0 for {symbol}...")
     try:
-        # 1. Fetch live available wallet balance
         live_balance = get_live_account_balance()
-        
-        # 2. Run LangGraph workflow StateGraph
         result = await run_swarm_workflow(symbol=symbol, timeframe="1h")
         
         price = result.get("market_data", {}).get("price", 63500.0)
         composite_score = result.get("composite_score", 0.0)
         direction = result.get("market_data", {}).get("direction", "🟢 LONG")
         
-        # 3. Lookup contract value for accurate contract lot sizing
         exec_client = DeltaExecutionClient(verify_proxy_on_init=False)
         product_id = exec_client.get_product_id_by_symbol(symbol) or 27
         
@@ -64,13 +60,11 @@ async def run_single_asset(symbol, auto_execute: bool = False):
         except Exception:
             pass
 
-        # 4. Run Risk & Position Sizing calculations against live account balance
         sizer = PositionSizer(account_balance=live_balance, risk_pct=2.0)
         entry_price = price
         stop_loss = entry_price * 0.9825 if "LONG" in direction else entry_price * 1.0175
         size_data = sizer.calculate_position_size(entry_price, stop_loss, composite_score, contract_value=contract_value)
         
-        # Display Execution Memo and Risk Sizing Outputs
         print("\n" + "="*80)
         print("           ⚡ SWARM INTERACTIVE PRE-TRADE MEMO (v18.0.0 APEX REAL) ⚡")
         print("="*80)
@@ -82,7 +76,6 @@ async def run_single_asset(symbol, auto_execute: bool = False):
             print(f"• {key:20}: {val}")
         print("="*80 + "\n")
         
-        # 5. Live Automated Order Execution on Delta Exchange India via Authenticated Proxy
         if auto_execute:
             print("="*80)
             print("          🚀 LIVE AUTOMATED ORDER EXECUTION (Delta Exchange India) 🚀")
@@ -115,7 +108,6 @@ async def run_single_asset(symbol, auto_execute: bool = False):
                         print(f"• Order State    : {ord_data.get('state')}")
                         print(f"• Time in Force  : {ord_data.get('time_in_force')}")
                         
-                        # Fetch updated available balance
                         upd_balance = get_live_account_balance()
                         print(f"• Updated Balance: ${upd_balance:,.2f} USD")
                     else:
@@ -131,13 +123,15 @@ async def run_single_asset(symbol, auto_execute: bool = False):
     finally:
         await DeltaClient().close_session()
 
-async def run_all_futures_scan():
+async def run_all_futures_scan(auto_execute: bool = False):
     from src.graph.workflow import run_swarm_workflow
     from src.connectors.delta_client import DeltaClient
+    from delta_execution_module import DeltaExecutionClient
+    from src.execution.sizing import PositionSizer
     
     now_ist = get_now_ist_str()
     print("\n" + "="*95)
-    print(f"       ⚡ ALL-FUTURES EXCHANGE ENTRY SCANNER (v18.0.0 APEX REAL) ⚡")
+    print(f"       ⚡ ALL-FUTURES EXCHANGE ENTRY SCANNER & AUTOMATED TRADER (v18.0.0 REAL) ⚡")
     print(f"       Execution Mode: Full CEX Futures Scan & StateGraph Consensus Ranking")
     print(f"       Timestamp: {now_ist}")
     print("="*95 + "\n")
@@ -266,6 +260,83 @@ async def run_all_futures_scan():
         json.dump(out_payload, f, indent=2)
         
     print("[*] Updated swarm_scan_results.json and all_perps_scan.json successfully.")
+
+    # High-Probability Execution for '/swarm trade all'
+    if auto_execute:
+        print("\n" + "="*95)
+        print("    🚀 AUTOMATED HIGH-PROBABILITY MARKET TRADE EXECUTION ENGINE 🚀")
+        print("="*95)
+        approved_setups = [r for r in valid_results if r.get("expected_value", 0.0) >= 0.80 and not r.get("veto_triggered")]
+        
+        if not approved_setups:
+            print("⚠️ No setups passed statistical high-probability thresholds (EV >= 0.80R). Zero orders executed.")
+        else:
+            top_setup = approved_setups[0]
+            top_symbol = top_setup.get("symbol")
+            top_ev = top_setup.get("expected_value")
+            top_score = top_setup.get("composite_score", 0.0) * 10
+            top_price = top_setup.get("market_data", {}).get("price", 0.0)
+            top_dir = top_setup.get("market_data", {}).get("direction", "🟢 LONG")
+            
+            print(f"🎯 Selected Top Priority Asset: #{top_symbol} | Score: {top_score:.1f} | EV: +{top_ev:.2f}R | Direction: {top_dir}")
+            
+            live_balance = get_live_account_balance()
+            exec_client = DeltaExecutionClient(verify_proxy_on_init=False)
+            product_id = exec_client.get_product_id_by_symbol(top_symbol) or 27
+            
+            contract_value = 1.0
+            try:
+                products = exec_client.get_products().get("result", [])
+                for p in products:
+                    if p.get("id") == product_id:
+                        contract_value = float(p.get("contract_value") or 1.0)
+                        break
+            except Exception:
+                pass
+
+            sizer = PositionSizer(account_balance=live_balance, risk_pct=2.0)
+            stop_loss = top_price * 0.9825 if "LONG" in top_dir else top_price * 1.0175
+            size_data = sizer.calculate_position_size(top_price, stop_loss, top_score, contract_value=contract_value)
+            
+            if size_data.get("decision") == "APPROVED":
+                side = "buy" if "LONG" in top_dir else "sell"
+                contracts = size_data.get("contracts", 1)
+                limit_price_str = f"{top_price:.4f}" if top_price < 1.0 else f"{top_price:.2f}"
+                
+                print(f"[*] Submitting Live Order on Delta Exchange India: {side.upper()} {contracts} contracts of #{top_symbol} (Product ID: {product_id}) @ ${limit_price_str}...")
+                
+                try:
+                    order_res = exec_client.place_order(
+                        product_id=product_id,
+                        size=contracts,
+                        side=side,
+                        order_type="limit_order",
+                        limit_price=limit_price_str,
+                        post_only=False
+                    )
+                    
+                    if order_res and order_res.get("success"):
+                        ord_data = order_res.get("result", {})
+                        print(f"\n✅ LIVE HIGH-PROBABILITY TRADE EXECUTED SUCCESSFULLY!")
+                        print(f"• Order ID       : {ord_data.get('id')}")
+                        print(f"• Product ID     : {ord_data.get('product_id')}")
+                        print(f"• Asset          : #{top_symbol}")
+                        print(f"• Side           : {ord_data.get('side', '').upper()}")
+                        print(f"• Contract Size  : {ord_data.get('size')}")
+                        print(f"• Limit Price    : ${ord_data.get('limit_price')}")
+                        print(f"• Order State    : {ord_data.get('state')}")
+                        print(f"• Time in Force  : {ord_data.get('time_in_force')}")
+                        
+                        upd_balance = get_live_account_balance()
+                        print(f"• Updated Balance: ${upd_balance:,.2f} USD")
+                    else:
+                        print(f"⚠️ Execution Response: {order_res}")
+                except Exception as ex:
+                    print(f"❌ Execution Exception: {ex}")
+            else:
+                print(f"⛔ Execution Blocked by Risk Engine: {size_data.get('reason')}")
+        print("="*95 + "\n")
+
     await DeltaClient().close_session()
 
 async def run_portfolio_risk_audit():
@@ -377,7 +448,7 @@ async def main():
     auto_execute = any(a in ["trade", "execute", "live", "auto", "autotrade"] for a in args)
 
     if any(a in ["scan", "all", "scan all", "scan_all"] for a in args):
-        await run_all_futures_scan()
+        await run_all_futures_scan(auto_execute=auto_execute)
     elif any(a in ["risk", "portfolio", "pnl", "positions", "journal"] for a in args):
         await run_portfolio_risk_audit()
     elif any(a in ["upgrade"] for a in args):
