@@ -3,6 +3,7 @@ import sys
 import os
 import logging
 import json
+import time
 from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 
@@ -31,6 +32,98 @@ def get_live_account_balance() -> float:
     except Exception as e:
         logger.warning(f"Could not fetch live account balance: {e}")
     return 24.77
+
+async def attach_sl_tp_to_all_positions():
+    """
+    Scans all active open positions on Delta Exchange India and synchronously
+    attaches hard reduce-only Stop Loss & Take Profit orders to any un-protected position.
+    """
+    from delta_execution_module import DeltaExecutionClient
+    from src.connectors.delta_client import DeltaClient
+    
+    print("\n" + "="*85)
+    print(" 🛡️ SYNCHRONOUS SL & TP POSITION PROTECTION ENGINE (Delta Exchange India) 🛡️")
+    print("="*85)
+    
+    client = DeltaExecutionClient(verify_proxy_on_init=False)
+    delta = DeltaClient()
+    
+    try:
+        pos_res = client.get_positions()
+        pos_list = pos_res.get("result", []) if pos_res and pos_res.get("success") else []
+    except Exception as e:
+        print(f"❌ Failed to fetch active positions: {e}")
+        return
+
+    active_pos = [p for p in pos_list if abs(float(p.get("size", 0))) > 0]
+    print(f"[*] Active Open Positions Audited: {len(active_pos)}")
+    
+    if not active_pos:
+        print("🟢 Zero open positions found. All assets clear.")
+        print("="*85 + "\n")
+        return
+
+    for pos in active_pos:
+        prod_info = pos.get("product", {})
+        sym = prod_info.get("symbol") or pos.get("symbol")
+        product_id = prod_info.get("id") or pos.get("product_id")
+        raw_size = float(pos.get("size", 0))
+        size = abs(raw_size)
+        entry_price = float(pos.get("entry_price", 0.0))
+        mark_price = float(pos.get("mark_price") or entry_price)
+        
+        side = "buy" if raw_size > 0 else "sell"
+        is_long = side == "buy"
+
+        # Fetch candles for ATR
+        end_t = int(time.time())
+        start_t = end_t - 30 * 24 * 3600
+        candles_res = await delta.fetch_candles(sym, resolution="1h", start=start_t, end=end_t)
+        
+        atr = entry_price * 0.015
+        if candles_res and candles_res.get("success"):
+            c_list = candles_res.get("result", [])
+            if len(c_list) >= 14:
+                highs = [float(c["high"]) for c in c_list if c.get("high")]
+                lows = [float(c["low"]) for c in c_list if c.get("low")]
+                closes = [float(c["close"]) for c in c_list if c.get("close")]
+                if len(closes) >= 14:
+                    trs = [max(highs[i] - lows[i], abs(highs[i] - closes[i-1]), abs(lows[i] - closes[i-1])) for i in range(1, len(closes))]
+                    atr = sum(trs[-14:]) / 14.0
+
+        stop_loss = entry_price - (1.4 * atr) if is_long else entry_price + (1.4 * atr)
+        risk_dist = abs(entry_price - stop_loss)
+        take_profit = entry_price + (3.0 * risk_dist) if is_long else entry_price - (3.0 * risk_dist)
+
+        sl_str = f"{stop_loss:.4f}" if entry_price < 1.0 else f"{stop_loss:.2f}"
+        tp_str = f"{take_profit:.4f}" if entry_price < 1.0 else f"{take_profit:.2f}"
+        entry_str = f"${entry_price:,.4f}" if entry_price < 1.0 else f"${entry_price:,.2f}"
+
+        print(f"\n--- [Synchronous Protection: #{sym}] ---")
+        print(f"• Position       : {side.upper()} {size} contracts @ {entry_str}")
+        print(f"• Hard SL Trigger : ${sl_str}")
+        print(f"• Hard TP Target  : ${tp_str} (3.0R Target)")
+
+        try:
+            sl_res = client.place_stop_loss_order(product_id, size, side, sl_str)
+            if sl_res and sl_res.get("success"):
+                print(f"✅ #{sym} HARD SL ATTACHED! Order ID: {sl_res.get('result', {}).get('id')}")
+            else:
+                print(f"⚠️ #{sym} SL Notice: {sl_res}")
+        except Exception as e:
+            print(f"⚠️ #{sym} SL Notice: {e}")
+
+        try:
+            tp_res = client.place_take_profit_order(product_id, size, side, tp_str)
+            if tp_res and tp_res.get("success"):
+                print(f"✅ #{sym} HARD TP ATTACHED! Order ID: {tp_res.get('result', {}).get('id')}")
+            else:
+                print(f"⚠️ #{sym} TP Notice: {tp_res}")
+        except Exception as e:
+            print(f"⚠️ #{sym} TP Notice: {e}")
+
+    print("="*85 + "\n")
+    await delta.close_session()
 
 async def run_single_asset(symbol, auto_execute: bool = False):
     from src.graph.workflow import run_swarm_workflow
@@ -86,7 +179,6 @@ async def run_single_asset(symbol, auto_execute: bool = False):
             print("   🚀 SYNCHRONOUS ORDER EXECUTION: ENTRY + HARD SL + HARD TP (Delta) 🚀")
             print("="*80)
 
-            # Duplicate trade check
             try:
                 pos_res = exec_client.get_positions()
                 pos_list = pos_res.get("result", []) if pos_res and pos_res.get("success") else []
@@ -300,7 +392,6 @@ async def run_all_futures_scan(auto_execute: bool = False):
         
     print("[*] Updated swarm_scan_results.json and all_perps_scan.json successfully.")
 
-    # High-Probability Execution Engine: TOP 3 ASSETS WITH DUPLICATE TRADE PREVENTION
     if auto_execute:
         print("\n" + "="*95)
         print("   🚀 AUTOMATED TOP 3 HIGH-PROBABILITY MARKET TRADER (NO DUPLICATE TRADES) 🚀")
@@ -507,7 +598,9 @@ async def main():
     args = [a.lower() for a in sys.argv[1:]]
     auto_execute = any(a in ["trade", "execute", "live", "auto", "autotrade"] for a in args)
 
-    if any(a in ["scan", "all", "scan all", "scan_all"] for a in args):
+    if any(a in ["protect", "sl", "tp", "attach"] for a in args):
+        await attach_sl_tp_to_all_positions()
+    elif any(a in ["scan", "all", "scan all", "scan_all"] for a in args):
         await run_all_futures_scan(auto_execute=auto_execute)
     elif any(a in ["risk", "portfolio", "pnl", "positions", "journal"] for a in args):
         await run_portfolio_risk_audit()
