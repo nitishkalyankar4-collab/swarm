@@ -41,9 +41,9 @@ async def attach_sl_tp_to_all_positions():
     from delta_execution_module import DeltaExecutionClient
     from src.connectors.delta_client import DeltaClient
     
-    print("\n" + "="*85)
+    print("\n" + "="*95)
     print(" 🛡️ SYNCHRONOUS SL & TP POSITION PROTECTION ENGINE (Delta Exchange India) 🛡️")
-    print("="*85)
+    print("="*95)
     
     client = DeltaExecutionClient(verify_proxy_on_init=False)
     delta = DeltaClient()
@@ -60,7 +60,7 @@ async def attach_sl_tp_to_all_positions():
     
     if not active_pos:
         print("🟢 Zero open positions found. All assets clear.")
-        print("="*85 + "\n")
+        print("="*95 + "\n")
         return
 
     for pos in active_pos:
@@ -70,7 +70,6 @@ async def attach_sl_tp_to_all_positions():
         raw_size = float(pos.get("size", 0))
         size = abs(raw_size)
         entry_price = float(pos.get("entry_price", 0.0))
-        mark_price = float(pos.get("mark_price") or entry_price)
         
         side = "buy" if raw_size > 0 else "sell"
         is_long = side == "buy"
@@ -122,7 +121,7 @@ async def attach_sl_tp_to_all_positions():
         except Exception as e:
             print(f"⚠️ #{sym} TP Notice: {e}")
 
-    print("="*85 + "\n")
+    print("="*95 + "\n")
     await delta.close_session()
 
 async def run_single_asset(symbol, auto_execute: bool = False):
@@ -492,21 +491,38 @@ async def run_all_futures_scan(auto_execute: bool = False):
 
 async def run_portfolio_risk_audit():
     from src.connectors.delta_client import DeltaClient
+    from delta_execution_module import DeltaExecutionClient
+    
     delta = DeltaClient()
+    client = DeltaExecutionClient(verify_proxy_on_init=False)
     
     now_ist = get_now_ist_str()
-    print("\n" + "="*105)
+    print("\n" + "="*115)
     print(f"📊 AUTOHEDGE PORTFOLIO REAL-TIME PnL & VALUE-AT-RISK AUDITOR (v18.0.0 APEX REAL) 📊")
     print(f"Timestamp: {now_ist}")
-    print("="*105 + "\n")
-    
-    positions = [
-        {"symbol": "SOLUSD", "side": "SHORT", "entry": 95.40, "size": 67.0, "notional": -6391.80, "margin": 254.75, "leverage": 25.1},
-        {"symbol": "DOGEUSD", "side": "LONG", "entry": 0.0890, "size": 6685.39, "notional": 595.00, "margin": 117.74, "leverage": 5.0},
-        {"symbol": "BTCUSD", "side": "SHORT", "entry": 77250.0, "size": 1.942, "notional": -150000.00, "margin": 750.00, "leverage": 200.0},
-        {"symbol": "ETHUSD", "side": "SHORT", "entry": 2425.0, "size": 41.237, "notional": -100000.00, "margin": 500.00, "leverage": 200.0}
-    ]
-    
+    print("="*115 + "\n")
+
+    # Fetch live active positions and live open trigger orders
+    pos_res = client.get_positions()
+    pos_list = pos_res.get("result", []) if pos_res and pos_res.get("success") else []
+    active_positions = [p for p in pos_list if abs(float(p.get("size", 0))) > 0]
+
+    open_orders_res = client.request("GET", "/v2/orders", params={"state": "open"})
+    open_orders = open_orders_res.get("result", []) if open_orders_res and open_orders_res.get("success") else []
+
+    # Map open trigger SL and TP orders by product symbol
+    sl_map = {}
+    tp_map = {}
+    for o in open_orders:
+        p_sym = o.get("product_symbol") or o.get("product", {}).get("symbol")
+        stop_type = o.get("stop_order_type")
+        price_val = o.get("stop_price") or o.get("limit_price")
+        if p_sym and price_val:
+            if stop_type == "stop_loss_order":
+                sl_map[p_sym] = float(price_val)
+            elif stop_type == "take_profit_order":
+                tp_map[p_sym] = float(price_val)
+
     tickers = {}
     try:
         t_data = await delta.fetch_tickers()
@@ -515,58 +531,71 @@ async def run_portfolio_risk_audit():
             tickers = {t["symbol"]: t for t in tickers_list}
     except Exception as e:
         logger.warning(f"Failed to fetch live prices for audit: {e}")
-        
-    print("Active Portfolio Positions & Real-Time PnL Tracker:")
+
+    print(f"Active Account Positions ({len(active_positions)}) & Real-Time PnL Tracker:")
     total_margin = 0.0
     total_notional = 0.0
     net_exposure = 0.0
     total_unrealized_pnl = 0.0
-    
-    print("-" * 115)
-    print(f"| {'Asset':8} | {'Side':5} | {'Lev':6} | {'Entry':10} | {'Mark Price':11} | {'Notional (USD)':15} | {'Margin':9} | {'UPnL (USD)':12} | {'UPnL %':8} |")
-    print("-" * 115)
-    
-    for pos in positions:
-        sym = pos["symbol"]
-        tick = tickers.get(sym, {})
-        mark_price = float(tick.get("close") or tick.get("mark_price") or pos["entry"])
-        
-        is_short = pos["side"] == "SHORT"
-        entry_price = pos["entry"]
-        
-        if is_short:
-            upnl = (entry_price - mark_price) * pos["size"]
-            current_notional = -1.0 * (mark_price * pos["size"])
-        else:
-            upnl = (mark_price - entry_price) * pos["size"]
-            current_notional = (mark_price * pos["size"])
 
-        upnl_pct = (upnl / pos["margin"]) * 100.0 if pos["margin"] > 0 else 0.0
-        
-        total_margin += pos["margin"]
-        total_notional += abs(current_notional)
-        net_exposure += current_notional
-        total_unrealized_pnl += upnl
-        
-        pnl_str = f"${upnl:+,.2f}"
-        pnl_pct_str = f"{upnl_pct:+.2f}%"
-        
-        entry_fmt = f"${entry_price:<8,.4f}" if entry_price < 1.0 else f"${entry_price:<8,.2f}"
-        mark_fmt = f"${mark_price:<9,.4f}" if mark_price < 1.0 else f"${mark_price:<9,.2f}"
-        
-        print(f"| {sym:8} | {pos['side']:5} | {pos['leverage']:4.1f}x | {entry_fmt} | {mark_fmt} | ${abs(current_notional):<13,.2f} | ${pos['margin']:<7.2f} | {pnl_str:<12} | {pnl_pct_str:<8} |")
-        
-    print("-" * 115)
-    
+    print("-" * 125)
+    print(f"| {'Asset':8} | {'Side':5} | {'Size':5} | {'Entry':9} | {'Mark':9} | {'SL Trigger':11} | {'TP Target':11} | {'UPnL (USD)':11} | {'UPnL %':8} |")
+    print("-" * 125)
+
+    if not active_positions:
+        print(f"| {'ZERO ACTIVE POSITIONS':^121} |")
+    else:
+        for pos in active_positions:
+            prod_info = pos.get("product", {})
+            sym = prod_info.get("symbol") or pos.get("symbol")
+            raw_size = float(pos.get("size", 0))
+            size = abs(raw_size)
+            is_short = raw_size < 0
+            side_str = "SHORT" if is_short else "LONG"
+            
+            entry_price = float(pos.get("entry_price", 0.0))
+            tick = tickers.get(sym, {})
+            mark_price = float(tick.get("close") or tick.get("mark_price") or pos.get("mark_price") or entry_price)
+
+            if is_short:
+                upnl = (entry_price - mark_price) * size
+                current_notional = -1.0 * (mark_price * size)
+            else:
+                upnl = (mark_price - entry_price) * size
+                current_notional = (mark_price * size)
+
+            margin = float(pos.get("margin") or pos.get("isolated_margin") or 10.0)
+            upnl_pct = (upnl / margin) * 100.0 if margin > 0 else 0.0
+
+            total_margin += margin
+            total_notional += abs(current_notional)
+            net_exposure += current_notional
+            total_unrealized_pnl += upnl
+
+            sl_price = sl_map.get(sym)
+            tp_price = tp_map.get(sym)
+
+            sl_fmt = f"${sl_price:<9.4f}" if sl_price and sl_price < 1.0 else (f"${sl_price:<9.2f}" if sl_price else "⚠️ MISSING")
+            tp_fmt = f"${tp_price:<9.4f}" if tp_price and tp_price < 1.0 else (f"${tp_price:<9.2f}" if tp_price else "⚠️ MISSING")
+            entry_fmt = f"${entry_price:<7.4f}" if entry_price < 1.0 else f"${entry_price:<7.2f}"
+            mark_fmt = f"${mark_price:<7.4f}" if mark_price < 1.0 else f"${mark_price:<7.2f}"
+
+            pnl_str = f"${upnl:+,.2f}"
+            pnl_pct_str = f"{upnl_pct:+.2f}%"
+
+            print(f"| {sym:8} | {side_str:5} | {int(size):<5} | {entry_fmt} | {mark_fmt} | {sl_fmt:11} | {tp_fmt:11} | {pnl_str:<11} | {pnl_pct_str:<8} |")
+
+    print("-" * 125)
+
     portfolio_heat = (total_margin / 10000.0) * 100
     net_exposure_ratio = (net_exposure / total_notional) * 100 if total_notional > 0 else 0.0
-    
+
     var_95 = total_notional * 0.0031
     cvar_99 = total_notional * 0.0051
-    
+
     total_pnl_str = f"${total_unrealized_pnl:+,.2f}"
     total_pnl_pct = (total_unrealized_pnl / total_margin) * 100 if total_margin > 0 else 0.0
-    
+
     print(f"• Total Portfolio Margin Capital : ${total_margin:,.2f} USD")
     print(f"• Total Active Capital Exposure  : ${total_notional:,.2f} USD")
     print(f"• Net Portfolio Unrealized PnL   : {total_pnl_str} ({total_pnl_pct:+.2f}% Return on Margin)")
@@ -574,9 +603,9 @@ async def run_portfolio_risk_audit():
     print(f"• Combined Portfolio Margin Heat : {portfolio_heat:.2f}% (Max target cap: 6.0%)")
     print(f"• Parametric Value-at-Risk (VaR) : ${var_95:,.2f} USD (95% 1-Day Horizon)")
     print(f"• Expected Shortfall (CVaR)     : ${cvar_99:,.2f} USD (99% 1-Day Horizon)")
-    print("-" * 105)
-    
-    if abs(net_exposure_ratio) > 30.0:
+    print("-" * 115)
+
+    if abs(net_exposure_ratio) > 30.0 and total_notional > 0:
         verdict = "⚠️ RISK EXPOSURE UNBALANCED"
         hedge_size = abs(net_exposure) * 0.40
         hedge_side = "LONG" if net_exposure < 0 else "SHORT"
@@ -584,10 +613,10 @@ async def run_portfolio_risk_audit():
     else:
         verdict = "🛡️ RISK EXPOSURE BALANCED"
         recommendation = "Portfolio delta is safely balanced. No hedge execution triggered."
-        
+
     print(f"AutoHedge Verdict: {verdict}")
     print(f"Hedging Action   : {recommendation}")
-    print("="*105 + "\n")
+    print("="*115 + "\n")
     await delta.close_session()
 
 async def main():
