@@ -67,9 +67,7 @@ async def run_single_asset(symbol, auto_execute: bool = False):
         stop_loss = entry_price - (1.4 * atr_1h) if is_long else entry_price + (1.4 * atr_1h)
         risk_dist = abs(entry_price - stop_loss)
         
-        # Minimum 1:3 Reward-to-Risk Profile Targets
         take_profit = entry_price + (3.0 * risk_dist) if is_long else entry_price - (3.0 * risk_dist)
-        
         size_data = sizer.calculate_position_size(entry_price, stop_loss, composite_score, contract_value=contract_value)
         
         print("\n" + "="*80)
@@ -83,11 +81,26 @@ async def run_single_asset(symbol, auto_execute: bool = False):
             print(f"• {key:20}: {val}")
         print("="*80 + "\n")
         
-        # Synchronous Order Execution with Hard SL and TP Orders
         if auto_execute:
             print("="*80)
             print("   🚀 SYNCHRONOUS ORDER EXECUTION: ENTRY + HARD SL + HARD TP (Delta) 🚀")
             print("="*80)
+
+            # Duplicate trade check
+            try:
+                pos_res = exec_client.get_positions()
+                pos_list = pos_res.get("result", []) if pos_res and pos_res.get("success") else []
+                active_symbols = [
+                    (p.get("product", {}).get("symbol") or p.get("symbol"))
+                    for p in pos_list if abs(float(p.get("size", 0))) > 0
+                ]
+                if symbol in active_symbols:
+                    print(f"⛔ DUPLICATE TRADE BLOCKED: An active position for #{symbol} is already open on exchange. Skipped until position closes.")
+                    print("="*80 + "\n")
+                    return
+            except Exception as e:
+                logger.warning(f"Could not check active positions for duplicate check: {e}")
+
             if size_data.get("decision") == "APPROVED":
                 side = "buy" if is_long else "sell"
                 contracts = size_data.get("contracts", 1)
@@ -287,103 +300,101 @@ async def run_all_futures_scan(auto_execute: bool = False):
         
     print("[*] Updated swarm_scan_results.json and all_perps_scan.json successfully.")
 
-    # High-Probability Execution for '/swarm trade all' with Synchronous SL and TP
+    # High-Probability Execution Engine: TOP 3 ASSETS WITH DUPLICATE TRADE PREVENTION
     if auto_execute:
         print("\n" + "="*95)
-        print("    🚀 AUTOMATED HIGH-PROBABILITY MARKET TRADE EXECUTION ENGINE (WITH SL & TP) 🚀")
+        print("   🚀 AUTOMATED TOP 3 HIGH-PROBABILITY MARKET TRADER (NO DUPLICATE TRADES) 🚀")
         print("="*95)
-        approved_setups = [r for r in valid_results if r.get("expected_value", 0.0) >= 0.80 and not r.get("veto_triggered")]
         
-        if not approved_setups:
-            print("⚠️ No setups passed statistical high-probability thresholds (EV >= 0.80R). Zero orders executed.")
+        exec_client = DeltaExecutionClient(verify_proxy_on_init=False)
+        active_symbols = set()
+        try:
+            pos_res = exec_client.get_positions()
+            pos_list = pos_res.get("result", []) if pos_res and pos_res.get("success") else []
+            for p in pos_list:
+                p_sym = p.get("product", {}).get("symbol") or p.get("symbol")
+                p_size = abs(float(p.get("size", 0)))
+                if p_sym and p_size > 0:
+                    active_symbols.add(p_sym)
+        except Exception as e:
+            logger.warning(f"Could not query active positions: {e}")
+
+        print(f"[*] Currently Active Exchange Positions ({len(active_symbols)}): {list(active_symbols)}")
+
+        approved_setups = [r for r in valid_results if r.get("expected_value", 0.0) >= 0.80 and not r.get("veto_triggered")]
+        eligible_setups = [s for s in approved_setups if s.get("symbol") not in active_symbols]
+
+        if not eligible_setups:
+            print("⚠️ No eligible setups available (all high-EV assets already have active open positions or EV < 0.80R). Zero duplicate trades taken.")
         else:
-            top_setup = approved_setups[0]
-            top_symbol = top_setup.get("symbol")
-            top_ev = top_setup.get("expected_value")
-            top_score = top_setup.get("composite_score", 0.0) * 10
-            top_price = top_setup.get("market_data", {}).get("price", 0.0)
-            top_dir = top_setup.get("market_data", {}).get("direction", "🟢 LONG")
-            atr_1h = top_setup.get("market_data", {}).get("atr_1h", top_price * 0.0025)
-            
-            is_long = "LONG" in top_dir
-            stop_loss = top_price - (1.4 * atr_1h) if is_long else top_price + (1.4 * atr_1h)
-            risk_dist = abs(top_price - stop_loss)
-            take_profit = top_price + (3.0 * risk_dist) if is_long else top_price - (3.0 * risk_dist)
+            top_3 = eligible_setups[:3]
+            print(f"🎯 Selected Top {len(top_3)} Priority Assets for Execution: {[s.get('symbol') for s in top_3]}\n")
 
-            print(f"🎯 Selected Top Priority Asset: #{top_symbol} | Score: {top_score:.1f} | EV: +{top_ev:.2f}R | Direction: {top_dir}")
-            
             live_balance = get_live_account_balance()
-            exec_client = DeltaExecutionClient(verify_proxy_on_init=False)
-            product_id = exec_client.get_product_id_by_symbol(top_symbol) or 27
-            
-            contract_value = 1.0
-            try:
-                products = exec_client.get_products().get("result", [])
-                for p in products:
-                    if p.get("id") == product_id:
-                        contract_value = float(p.get("contract_value") or 1.0)
-                        break
-            except Exception:
-                pass
+            products_list = exec_client.get_products().get("result", [])
+            prod_map = {p.get("symbol"): p for p in products_list}
 
-            sizer = PositionSizer(account_balance=live_balance, risk_pct=2.5)
-            size_data = sizer.calculate_position_size(top_price, stop_loss, top_score, contract_value=contract_value)
-            
-            if size_data.get("decision") == "APPROVED":
-                side = "buy" if is_long else "sell"
-                contracts = size_data.get("contracts", 1)
-                limit_price_str = f"{top_price:.4f}" if top_price < 1.0 else f"{top_price:.2f}"
-                sl_price_str = f"{stop_loss:.4f}" if stop_loss < 1.0 else f"{stop_loss:.2f}"
-                tp_price_str = f"{take_profit:.4f}" if take_profit < 1.0 else f"{take_profit:.2f}"
-                
-                print(f"[*] Submitting Live Entry Order on Delta Exchange India: {side.upper()} {contracts} contracts of #{top_symbol} (Product ID: {product_id}) @ ${limit_price_str}...")
-                print(f"[*] Synchronous Hard Stop Loss Target   : ${sl_price_str}")
-                print(f"[*] Synchronous Hard Take Profit Target : ${tp_price_str} (3.0R Target)")
+            for rank_idx, setup in enumerate(top_3):
+                sym = setup.get("symbol")
+                ev = setup.get("expected_value")
+                score = setup.get("composite_score", 0.0) * 10
+                price = setup.get("market_data", {}).get("price", 0.0)
+                direction = setup.get("market_data", {}).get("direction", "🟢 LONG")
+                atr_1h = setup.get("market_data", {}).get("atr_1h", price * 0.0025)
 
-                try:
-                    exec_res = exec_client.place_order_with_sl_tp(
-                        product_id=product_id,
-                        size=contracts,
-                        side=side,
-                        order_type="limit_order",
-                        limit_price=limit_price_str,
-                        stop_loss_price=sl_price_str,
-                        take_profit_price=tp_price_str
-                    )
-                    
-                    entry_ord = exec_res.get("entry_order", {})
-                    sl_ord = exec_res.get("stop_loss_order", {})
-                    tp_ord = exec_res.get("take_profit_order", {})
+                prod_info = prod_map.get(sym, {})
+                product_id = prod_info.get("id") or exec_client.get_product_id_by_symbol(sym) or 27
+                contract_val = float(prod_info.get("contract_value") or 1.0)
 
-                    if entry_ord and entry_ord.get("success"):
-                        ord_data = entry_ord.get("result", {})
-                        print(f"\n✅ LIVE HIGH-PROBABILITY TRADE EXECUTED SUCCESSFULLY!")
-                        print(f"• Entry Order ID : {ord_data.get('id')}")
-                        print(f"• Product ID     : {ord_data.get('product_id')}")
-                        print(f"• Asset          : #{top_symbol}")
-                        print(f"• Side           : {ord_data.get('side', '').upper()}")
-                        print(f"• Contract Size  : {ord_data.get('size')}")
-                        print(f"• Limit Price    : ${ord_data.get('limit_price')}")
-                        print(f"• Order State    : {ord_data.get('state')}")
-                        
-                        if sl_ord and sl_ord.get("success"):
-                            print(f"✅ HARD STOP LOSS ORDER ATTACHED! ID: {sl_ord.get('result', {}).get('id')} @ Trigger ${sl_price_str}")
+                is_long = "LONG" in direction
+                stop_loss = price - (1.4 * atr_1h) if is_long else price + (1.4 * atr_1h)
+                risk_dist = abs(price - stop_loss)
+                take_profit = price + (3.0 * risk_dist) if is_long else price - (3.0 * risk_dist)
+
+                sizer = PositionSizer(account_balance=live_balance, risk_pct=2.5)
+                size_data = sizer.calculate_position_size(price, stop_loss, score, contract_value=contract_val)
+
+                if size_data.get("decision") == "APPROVED":
+                    side = "buy" if is_long else "sell"
+                    contracts = size_data.get("contracts", 1)
+                    limit_price_str = f"{price:.4f}" if price < 1.0 else f"{price:.2f}"
+                    sl_price_str = f"{stop_loss:.4f}" if stop_loss < 1.0 else f"{stop_loss:.2f}"
+                    tp_price_str = f"{take_profit:.4f}" if take_profit < 1.0 else f"{take_profit:.2f}"
+
+                    print(f"--- [Trade #{rank_idx+1}/3: #{sym}] ---")
+                    print(f"[*] Submitting Entry Order: {side.upper()} {contracts} contracts of #{sym} @ ${limit_price_str}...")
+                    print(f"[*] Hard Stop Loss Target   : ${sl_price_str}")
+                    print(f"[*] Hard Take Profit Target : ${tp_price_str} (3.0R Target)")
+
+                    try:
+                        exec_res = exec_client.place_order_with_sl_tp(
+                            product_id=product_id,
+                            size=contracts,
+                            side=side,
+                            order_type="limit_order",
+                            limit_price=limit_price_str,
+                            stop_loss_price=sl_price_str,
+                            take_profit_price=tp_price_str
+                        )
+                        entry_ord = exec_res.get("entry_order", {})
+                        sl_ord = exec_res.get("stop_loss_order", {})
+                        tp_ord = exec_res.get("take_profit_order", {})
+
+                        if entry_ord and entry_ord.get("success"):
+                            print(f"✅ #{sym} ENTRY ORDER PLACED! ID: {entry_ord.get('result', {}).get('id')}")
+                            if sl_ord and sl_ord.get("success"):
+                                print(f"✅ #{sym} HARD SL ATTACHED! ID: {sl_ord.get('result', {}).get('id')} @ Trigger ${sl_price_str}")
+                            if tp_ord and tp_ord.get("success"):
+                                print(f"✅ #{sym} HARD TP ATTACHED! ID: {tp_ord.get('result', {}).get('id')} @ Target ${tp_price_str}")
                         else:
-                            print(f"⚠️ Stop Loss Notice: {sl_ord}")
+                            print(f"⚠️ Entry Order Notice for #{sym}: {entry_ord}")
+                    except Exception as ex:
+                        print(f"❌ Execution Exception for #{sym}: {ex}")
+                else:
+                    print(f"⛔ Trade #{rank_idx+1} (#{sym}) Blocked by Risk Engine: {size_data.get('reason')}")
 
-                        if tp_ord and tp_ord.get("success"):
-                            print(f"✅ HARD TAKE PROFIT ORDER ATTACHED! ID: {tp_ord.get('result', {}).get('id')} @ Target ${tp_price_str}")
-                        else:
-                            print(f"⚠️ Take Profit Notice: {tp_ord}")
-
-                        upd_balance = get_live_account_balance()
-                        print(f"• Updated Balance: ${upd_balance:,.2f} USD")
-                    else:
-                        print(f"⚠️ Execution Response: {entry_ord}")
-                except Exception as ex:
-                    print(f"❌ Execution Exception: {ex}")
-            else:
-                print(f"⛔ Execution Blocked by Risk Engine: {size_data.get('reason')}")
+            upd_bal = get_live_account_balance()
+            print(f"\n[*] Updated Available Account Balance: ${upd_bal:,.2f} USD")
         print("="*95 + "\n")
 
     await DeltaClient().close_session()
