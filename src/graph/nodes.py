@@ -18,6 +18,12 @@ from src.graph.state import SwarmState
 logger = logging.getLogger(__name__)
 IST = timezone(timedelta(hours=5, minutes=30))
 
+def fmt_price(val: float) -> str:
+    """Smart price formatting helper: uses 4 decimal places for values < $1.00, else 2."""
+    if val < 1.0:
+        return f"${val:,.4f}"
+    return f"${val:,.2f}"
+
 async def alpha_node(state: SwarmState) -> Dict[str, Any]:
     """
     Agent Alpha (Micro Quant Sniper):
@@ -174,7 +180,7 @@ async def trend_node(state: SwarmState) -> Dict[str, Any]:
     rsi_1h = 100.0 if avg_loss == 0 else round(100.0 - (100.0 / (1.0 + (avg_gain / avg_loss))), 2)
 
     trs = [max(highs[i] - lows[i], abs(highs[i] - prices[i-1]), abs(lows[i] - prices[i-1])) for i in range(1, len(prices))]
-    atr_val = round(calc_ema(trs, 14), 2) if len(trs) >= 14 else round(prices[-1] * 0.0025, 2)
+    atr_val = round(calc_ema(trs, 14), 4) if len(trs) >= 14 else round(prices[-1] * 0.0025, 4)
     atrs_list = [atr_val] * len(prices)
 
     hmm_classifier = DiscreteHMMRegimeClassifier()
@@ -242,7 +248,6 @@ async def prob_node(state: SwarmState) -> Dict[str, Any]:
     atr_1h = state.get("market_data", {}).get("atr_1h", 150.0)
     price = state.get("market_data", {}).get("price", 63500.0)
 
-    # 1. Real Pure Python Ensemble Classifier Prediction
     cvd_ratio = 0.25 if "BULLISH" in cvd_status else (-0.25 if "BEARISH" in cvd_status else 0.0)
     ema_flag = 1.0 if ema_aligned == "BULLISH_ALIGNED" else (-1.0 if ema_aligned == "BEARISH_ALIGNED" else 0.0)
     rsi_diff = rsi_1h - 50.0
@@ -253,12 +258,10 @@ async def prob_node(state: SwarmState) -> Dict[str, Any]:
     p_win_ml = ensemble.predict_probability(features)
     s_ml = round(5.0 + (p_win_ml * 5.0), 2)
 
-    # 2. Real DRL Policy Engine Execution
     regime_state_idx = state.get("market_data", {}).get("hmm_state_idx", 0)
     drl_engine = DRLPolicyEngine()
     drl_policy = drl_engine.get_action_policy(regime_state_idx, cvd_status, vpin, ema_aligned)
 
-    # 3. Strategy-Aligned Vectorized Strategy Backtesting Audit
     prices = state.get("market_data", {}).get("historical_prices", [])
     raw_returns = [(prices[i] - prices[i-1]) / prices[i-1] for i in range(1, len(prices))] if len(prices) > 1 else []
     
@@ -272,7 +275,6 @@ async def prob_node(state: SwarmState) -> Dict[str, Any]:
         backtest_metrics["sharpe"] = 1.85
         backtest_metrics["sortino"] = 2.45
 
-    # 4. Real Portfolio VaR / CVaR Risk Audit & HRP Optimization
     hrp_opt = HierarchicalRiskParityOptimizer()
     hrp_weights = hrp_opt.compute_weights({symbol: raw_returns, "BTCUSD": raw_returns})
     
@@ -280,7 +282,6 @@ async def prob_node(state: SwarmState) -> Dict[str, Any]:
     portfolio_val = 10000.0
     var_metrics = var_auditor.audit_portfolio(portfolio_val, {symbol: portfolio_val * 0.4}, raw_returns)
 
-    # 5. Expectancy Math: EV = (P_win * R_reward) - ((1 - P_win) * R_risk)
     s_alpha = state.get("s_alpha", 5.0)
     s_trend = state.get("s_trend", 5.0)
     s_sentiment = state.get("s_sentiment", 5.0)
@@ -359,7 +360,7 @@ async def exec_node(state: SwarmState) -> Dict[str, Any]:
         html_memo = f"""🔍 <b>QUANT SWARM DIAGNOSTIC REPORT</b>: <code>#{symbol}</code>
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
 <b>Time:</b> <code>{now_ist}</code>
-<b>Current Price:</b> <code>${price:,.2f}</code>
+<b>Current Price:</b> <code>{fmt_price(price)}</code>
 
 🛡️ <b>REAL MULTI-AGENT QUANT AUDIT (v17.0.0 APEX)</b>
 • <b>Veto Status:</b> 🔴 <b>REJECTED / VETO ACTIVE</b>
@@ -446,21 +447,21 @@ async def exec_node(state: SwarmState) -> Dict[str, Any]:
 
 ⚡ <b>SCALP (15m Timeframe | Hold: 15m - 2h)</b>
 • <b>Direction:</b> {dir_label}
-• <b>Entry Zone:</b> <code>${scalp_entry:,.2f}</code>
-• <b>Stop Loss:</b> <code>${scalp_sl:,.2f}</code>
-• <b>Targets:</b> TP1: <code>${scalp_tp1:,.2f}</code> (1.5R) | TP2: <code>${scalp_tp2:,.2f}</code> | TP3: <code>${scalp_tp3:,.2f}</code>
+• <b>Entry Zone:</b> <code>{fmt_price(scalp_entry)}</code>
+• <b>Stop Loss:</b> <code>{fmt_price(scalp_sl)}</code>
+• <b>Targets:</b> TP1: <code>{fmt_price(scalp_tp1)}</code> (1.5R) | TP2: <code>{fmt_price(scalp_tp2)}</code> | TP3: <code>{fmt_price(scalp_tp3)}</code>
 
 📈 <b>INTRADAY (1h Timeframe | Hold: 2h - 24h)</b>
 • <b>Direction:</b> {dir_label}
-• <b>Entry Zone:</b> <code>${intra_entry:,.2f}</code>
-• <b>Stop Loss:</b> <code>${intra_sl:,.2f}</code>
-• <b>Targets:</b> TP1: <code>${intra_tp1:,.2f}</code> (1.8R) | TP2: <code>${intra_tp2:,.2f}</code> | TP3: <code>${intra_tp3:,.2f}</code>
+• <b>Entry Zone:</b> <code>{fmt_price(intra_entry)}</code>
+• <b>Stop Loss:</b> <code>{fmt_price(intra_sl)}</code>
+• <b>Targets:</b> TP1: <code>{fmt_price(intra_tp1)}</code> (1.8R) | TP2: <code>{fmt_price(intra_tp2)}</code> | TP3: <code>{fmt_price(intra_tp3)}</code>
 
 🌊 <b>SWING (4h / 1D Timeframe | Hold: 1d - 7d)</b>
 • <b>Direction:</b> {dir_label}
-• <b>Entry Zone:</b> <code>${swing_entry:,.2f}</code>
-• <b>Stop Loss:</b> <code>${swing_sl:,.2f}</code>
-• <b>Targets:</b> TP1: <code>${swing_tp1:,.2f}</code> (2.5R) | TP2: <code>${swing_tp2:,.2f}</code> | TP3: <code>${swing_tp3:,.2f}</code>
+• <b>Entry Zone:</b> <code>{fmt_price(swing_entry)}</code>
+• <b>Stop Loss:</b> <code>{fmt_price(swing_sl)}</code>
+• <b>Targets:</b> TP1: <code>{fmt_price(swing_tp1)}</code> (2.5R) | TP2: <code>{fmt_price(swing_tp2)}</code> | TP3: <code>{fmt_price(swing_tp3)}</code>
 
 🧠 <b>REAL LANGGRAPH 5-AGENT CONSENSUS</b>
 • <b>Agent Alpha:</b> Score {state.get("s_alpha")} ({state.get("market_data", {}).get("cvd_status")})
