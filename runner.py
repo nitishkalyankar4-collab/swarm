@@ -196,16 +196,17 @@ async def run_portfolio_risk_audit():
     from src.connectors.delta_client import DeltaClient
     delta = DeltaClient()
     
-    print("\n" + "="*80)
-    print(f"🛡️ AUTOHEDGE PORTFOLIO RISK & VAL-AT-RISK AUDITOR (v17.0.0 APEX) 🛡️")
-    print(f"Timestamp: {get_now_ist_str()}")
-    print("="*80)
+    now_ist = get_now_ist_str()
+    print("\n" + "="*105)
+    print(f"📊 AUTOHEDGE PORTFOLIO REAL-TIME PnL & VALUE-AT-RISK AUDITOR (v17.0.0 APEX) 📊")
+    print(f"Timestamp: {now_ist}")
+    print("="*105 + "\n")
     
     positions = [
-        {"symbol": "SOLUSD", "side": "SHORT", "entry": 75.68, "notional": -6397.10, "margin": 254.75, "leverage": 25.1},
-        {"symbol": "DOGEUSD", "side": "LONG", "entry": 0.0698, "notional": 595.00, "margin": 117.74, "leverage": 5.0},
-        {"symbol": "BTCUSD", "side": "SHORT", "entry": 63200.0, "notional": -150000.00, "margin": 750.00, "leverage": 200.0},
-        {"symbol": "ETHUSD", "side": "SHORT", "entry": 1890.0, "notional": -100000.00, "margin": 500.00, "leverage": 200.0}
+        {"symbol": "SOLUSD", "side": "SHORT", "entry": 95.40, "size": 67.0, "notional": -6391.80, "margin": 254.75, "leverage": 25.1},
+        {"symbol": "DOGEUSD", "side": "LONG", "entry": 0.0890, "size": 6685.39, "notional": 595.00, "margin": 117.74, "leverage": 5.0},
+        {"symbol": "BTCUSD", "side": "SHORT", "entry": 77250.0, "size": 1.942, "notional": -150000.00, "margin": 750.00, "leverage": 200.0},
+        {"symbol": "ETHUSD", "side": "SHORT", "entry": 2425.0, "size": 41.237, "notional": -100000.00, "margin": 500.00, "leverage": 200.0}
     ]
     
     tickers = {}
@@ -217,30 +218,48 @@ async def run_portfolio_risk_audit():
     except Exception as e:
         logger.warning(f"Failed to fetch live prices for audit: {e}")
         
-    print("Active Positions Analysis:")
+    print("Active Portfolio Positions & Real-Time PnL Tracker:")
     total_margin = 0.0
     total_notional = 0.0
     net_exposure = 0.0
+    total_unrealized_pnl = 0.0
     
-    print("-" * 88)
-    print(f"| {'Asset':8} | {'Side':5} | {'Lev':6} | {'Entry':11} | {'Mark':11} | {'Notional (USD)':15} | {'Margin':8} |")
-    print("-" * 88)
+    print("-" * 115)
+    print(f"| {'Asset':8} | {'Side':5} | {'Lev':6} | {'Entry':10} | {'Mark Price':11} | {'Notional (USD)':15} | {'Margin':9} | {'UPnL (USD)':12} | {'UPnL %':8} |")
+    print("-" * 115)
     
     for pos in positions:
         sym = pos["symbol"]
         tick = tickers.get(sym, {})
         mark_price = float(tick.get("close") or tick.get("mark_price") or pos["entry"])
         
-        ratio = mark_price / pos["entry"]
-        current_notional = pos["notional"] * ratio
+        is_short = pos["side"] == "SHORT"
+        entry_price = pos["entry"]
+        
+        # Calculate UPnL
+        if is_short:
+            upnl = (entry_price - mark_price) * pos["size"]
+            current_notional = -1.0 * (mark_price * pos["size"])
+        else:
+            upnl = (mark_price - entry_price) * pos["size"]
+            current_notional = (mark_price * pos["size"])
+
+        upnl_pct = (upnl / pos["margin"]) * 100.0 if pos["margin"] > 0 else 0.0
         
         total_margin += pos["margin"]
         total_notional += abs(current_notional)
         net_exposure += current_notional
+        total_unrealized_pnl += upnl
         
-        print(f"| {sym:8} | {pos['side']:5} | {pos['leverage']:4.1f}x | ${pos['entry']:<9,.4f} | ${mark_price:<9,.4f} | ${current_notional:<13,.2f} | ${pos['margin']:<8.2f} |")
+        pnl_str = f"${upnl:+,.2f}"
+        pnl_pct_str = f"{upnl_pct:+.2f}%"
         
-    print("-" * 88)
+        entry_fmt = f"${entry_price:<8,.4f}" if entry_price < 1.0 else f"${entry_price:<8,.2f}"
+        mark_fmt = f"${mark_price:<9,.4f}" if mark_price < 1.0 else f"${mark_price:<9,.2f}"
+        
+        print(f"| {sym:8} | {pos['side']:5} | {pos['leverage']:4.1f}x | {entry_fmt} | {mark_fmt} | ${abs(current_notional):<13,.2f} | ${pos['margin']:<7.2f} | {pnl_str:<12} | {pnl_pct_str:<8} |")
+        
+    print("-" * 115)
     
     portfolio_heat = (total_margin / 10000.0) * 100
     net_exposure_ratio = (net_exposure / total_notional) * 100 if total_notional > 0 else 0.0
@@ -248,12 +267,17 @@ async def run_portfolio_risk_audit():
     var_95 = total_notional * 0.0031
     cvar_99 = total_notional * 0.0051
     
-    print(f"• Total Active Capital Exposure : ${total_notional:,.2f} USD")
-    print(f"• Net Directional Delta Bias   : ${net_exposure:,.2f} USD ({net_exposure_ratio:.1f}% Bias)")
-    print(f"• Combined Portfolio Heat      : {portfolio_heat:.2f}% (Max target cap: 6.0%)")
-    print(f"• Parametric Value-at-Risk (VaR): ${var_95:,.2f} USD (95% 1-Day Horizon)")
-    print(f"• Expected Shortfall (CVaR)    : ${cvar_99:,.2f} USD (99% 1-Day Horizon)")
-    print("-" * 80)
+    total_pnl_str = f"${total_unrealized_pnl:+,.2f}"
+    total_pnl_pct = (total_unrealized_pnl / total_margin) * 100 if total_margin > 0 else 0.0
+    
+    print(f"• Total Portfolio Margin Capital : ${total_margin:,.2f} USD")
+    print(f"• Total Active Capital Exposure  : ${total_notional:,.2f} USD")
+    print(f"• Net Portfolio Unrealized PnL   : {total_pnl_str} ({total_pnl_pct:+.2f}% Return on Margin)")
+    print(f"• Net Directional Delta Bias    : ${net_exposure:,.2f} USD ({net_exposure_ratio:.1f}% Bias)")
+    print(f"• Combined Portfolio Margin Heat : {portfolio_heat:.2f}% (Max target cap: 6.0%)")
+    print(f"• Parametric Value-at-Risk (VaR) : ${var_95:,.2f} USD (95% 1-Day Horizon)")
+    print(f"• Expected Shortfall (CVaR)     : ${cvar_99:,.2f} USD (99% 1-Day Horizon)")
+    print("-" * 105)
     
     if abs(net_exposure_ratio) > 30.0:
         verdict = "⚠️ RISK EXPOSURE UNBALANCED"
@@ -266,7 +290,7 @@ async def run_portfolio_risk_audit():
         
     print(f"AutoHedge Verdict: {verdict}")
     print(f"Hedging Action   : {recommendation}")
-    print("="*80 + "\n")
+    print("="*105 + "\n")
     await delta.close_session()
 
 async def main():
@@ -276,7 +300,7 @@ async def main():
         
     if target.lower() in ["scan", "all", "scan all", "scan_all"]:
         await run_all_futures_scan()
-    elif target.lower() in ["risk", "portfolio"]:
+    elif target.lower() in ["risk", "portfolio", "pnl", "positions", "journal"]:
         await run_portfolio_risk_audit()
     elif target.lower() in ["upgrade"]:
         print(f"\n⚡ Upgrading master quant system engine to v17.0.0 APEX...")
