@@ -1,6 +1,6 @@
 """
 Delta Exchange India Production Execution Module
-Integrated with Authenticated HTTP/HTTPS Proxy & HMAC-SHA256 Request Signing
+Integrated with Authenticated HTTP/HTTPS Proxy, HMAC-SHA256 Signing & Synchronous SL/TP Orders
 """
 
 import hmac
@@ -19,7 +19,8 @@ logger = logging.getLogger("DeltaExecutionClient")
 class DeltaExecutionClient:
     """
     Production-ready execution client for Delta Exchange India (api.india.delta.exchange)
-    integrated with authenticated proxy routing and HMAC-SHA256 request signing.
+    integrated with authenticated proxy routing, HMAC-SHA256 request signing,
+    and synchronous hard Stop Loss & Take Profit order placement.
     """
 
     def __init__(
@@ -41,7 +42,6 @@ class DeltaExecutionClient:
         self.max_retries = max_retries
         self.timeout = timeout
 
-        # Configure session with explicit proxy routing
         self.session = requests.Session()
         if self.proxy_url:
             self.session.proxies = {
@@ -49,14 +49,13 @@ class DeltaExecutionClient:
                 "https": self.proxy_url
             }
 
-        # Perform startup pre-flight verification
         if verify_proxy_on_init:
             self.verify_proxy_ip()
 
     def verify_proxy_ip(self) -> bool:
         """
         Pre-flight check: Queries https://api.ipify.org?format=json through the proxy
-        to verify that the outbound public IP matches the expected proxy IP.
+        to verify that the outbound public IP matches expected proxy IP (31.59.20.176).
         """
         logger.info("Executing proxy pre-flight check via https://api.ipify.org?format=json...")
         try:
@@ -79,8 +78,8 @@ class DeltaExecutionClient:
 
     def _generate_signature(self, method: str, path: str, query_str: str = "", body_str: str = "") -> Tuple[str, str]:
         """
-        Generates HMAC-SHA256 signature for Delta Exchange India request authentication.
-        Signature payload: Method + Timestamp + Path + QueryString + BodyString
+        Generates HMAC-SHA256 signature for Delta Exchange India authentication header logic.
+        Signature Payload: Method + Timestamp + Path + QueryString + BodyString
         """
         timestamp = str(int(time.time()))
         signature_payload = method.upper() + timestamp + path + query_str + body_str
@@ -100,8 +99,8 @@ class DeltaExecutionClient:
         authenticated: bool = True
     ) -> Dict[str, Any]:
         """
-        Sends an HTTP request with automatic session proxy routing, HMAC-SHA256 signing,
-        HTTP status code checking, and connection timeout retries.
+        Sends HTTP requests with session proxy routing, HMAC-SHA256 signing,
+        status code error handling, and connection timeout retries.
         """
         method = method.upper()
         if not path.startswith("/"):
@@ -141,7 +140,6 @@ class DeltaExecutionClient:
                 else:
                     raise ValueError(f"Unsupported HTTP method: {method}")
 
-                # Rate limit handling (HTTP 429)
                 if resp.status_code == 429:
                     backoff = 2 ** attempt
                     logger.warning(f"Rate limited (HTTP 429). Attempt {attempt}/{self.max_retries}. Backing off {backoff}s...")
@@ -228,6 +226,90 @@ class DeltaExecutionClient:
         logger.info(f"Placing {order_type_fmt} order: {side_fmt.upper()} {size} contracts on Product ID {product_id} @ Price: {limit_price or 'MARKET'}")
         return self.request("POST", "/v2/orders", data=payload, authenticated=True)
 
+    def place_stop_loss_order(
+        self,
+        product_id: int,
+        size: Union[int, float],
+        side: str,
+        stop_price: Union[int, float, str]
+    ) -> Dict[str, Any]:
+        """
+        Submits synchronous reduce-only Stop Loss order to Delta Exchange India.
+        """
+        opp_side = "sell" if side.lower() == "buy" else "buy"
+        payload = {
+            "product_id": int(product_id),
+            "size": int(size) if isinstance(size, int) else float(size),
+            "side": opp_side,
+            "order_type": "market_order",
+            "stop_order_type": "stop_loss_order",
+            "stop_price": str(stop_price),
+            "reduce_only": True
+        }
+        logger.info(f"Submitting Hard Stop Loss Order: {opp_side.upper()} {size} contracts on Product ID {product_id} @ Trigger ${stop_price}...")
+        return self.request("POST", "/v2/orders", data=payload, authenticated=True)
+
+    def place_take_profit_order(
+        self,
+        product_id: int,
+        size: Union[int, float],
+        side: str,
+        take_profit_price: Union[int, float, str]
+    ) -> Dict[str, Any]:
+        """
+        Submits synchronous reduce-only Take Profit order to Delta Exchange India.
+        """
+        opp_side = "sell" if side.lower() == "buy" else "buy"
+        payload = {
+            "product_id": int(product_id),
+            "size": int(size) if isinstance(size, int) else float(size),
+            "side": opp_side,
+            "order_type": "limit_order",
+            "stop_order_type": "take_profit_order",
+            "stop_price": str(take_profit_price),
+            "limit_price": str(take_profit_price),
+            "reduce_only": True
+        }
+        logger.info(f"Submitting Hard Take Profit Order: {opp_side.upper()} {size} contracts on Product ID {product_id} @ Target ${take_profit_price}...")
+        return self.request("POST", "/v2/orders", data=payload, authenticated=True)
+
+    def place_order_with_sl_tp(
+        self,
+        product_id: int,
+        size: Union[int, float],
+        side: str,
+        order_type: str = "limit_order",
+        limit_price: Optional[Union[int, float, str]] = None,
+        stop_loss_price: Optional[Union[int, float, str]] = None,
+        take_profit_price: Optional[Union[int, float, str]] = None
+    ) -> Dict[str, Any]:
+        """
+        Places entry order and synchronously attaches hard Stop Loss & Take Profit orders upon entry fill.
+        """
+        entry_res = self.place_order(product_id, size, side, order_type, limit_price)
+        
+        sl_res = None
+        tp_res = None
+
+        if entry_res and entry_res.get("success"):
+            if stop_loss_price:
+                try:
+                    sl_res = self.place_stop_loss_order(product_id, size, side, stop_loss_price)
+                except Exception as e:
+                    logger.error(f"Failed to submit synchronous Stop Loss order: {e}")
+
+            if take_profit_price:
+                try:
+                    tp_res = self.place_take_profit_order(product_id, size, side, take_profit_price)
+                except Exception as e:
+                    logger.error(f"Failed to submit synchronous Take Profit order: {e}")
+
+        return {
+            "entry_order": entry_res,
+            "stop_loss_order": sl_res,
+            "take_profit_order": tp_res
+        }
+
     def cancel_order(self, product_id: int, order_id: int) -> Dict[str, Any]:
         """
         Cancels active open order.
@@ -265,21 +347,3 @@ class DeltaExecutionClient:
             if p.get("symbol") == symbol:
                 return p.get("id")
         return None
-
-if __name__ == "__main__":
-    print("=== DELTA EXCHANGE INDIA EXECUTION MODULE VERIFICATION ===")
-    client = DeltaExecutionClient()
-    
-    # 1. Test get_balance()
-    balance = client.get_balance()
-    print("\n1. Wallet Balance Response:")
-    print(json.dumps(balance, indent=2)[:400] + "\n...")
-
-    # 2. Test get_positions()
-    positions = client.get_positions()
-    print("\n2. Active Positions Response:")
-    print(json.dumps(positions, indent=2)[:400] + "\n...")
-
-    # 3. Lookup Product ID for BTCUSD
-    btc_id = client.get_product_id_by_symbol("BTCUSD")
-    print(f"\n3. BTCUSD Product ID Lookup: {btc_id}")
